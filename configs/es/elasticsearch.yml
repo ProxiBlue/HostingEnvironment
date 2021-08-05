@@ -1,0 +1,13 @@
+discovery.type: single-node
+http.cors.enabled: true
+http.cors.allow-origin: /.*/
+xpack.security.enabled: false
+indices:
+  memory:
+    index_buffer_size: 50%
+index:
+  codec: "best_compression"
+network.host: 0.0.0.0
+indexing_pressure:
+  memory:
+    limit: 50%
