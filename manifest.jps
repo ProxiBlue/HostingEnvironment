@@ -53,7 +53,7 @@ nodes:
   count: 1
   cloudlets: 28
   displayName: Database
-  diskLimit: 200
+  diskLimit: 200G
   nodeGroup: sqldb
 
 - nodeType: redis
@@ -68,7 +68,7 @@ nodes:
   count: 1
   cloudlets: 28
   displayName: Elastic Cache
-  diskLimit: 5G
+  diskLimit: 100G
   nodeGroup: es
   image: elasticsearch:7.9.3
   entrypoint: ["/usr/bin/supervisord","-c","/etc/supervisord.conf"]
