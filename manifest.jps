@@ -71,6 +71,7 @@ nodes:
   diskLimit: 5G
   nodeGroup: es
   image: elasticsearch:7.9.3
+  entrypoint: /usr/bin/supervisord -c /etc/supervisord.conf
 
 onInstall:
   - log: Set Node Display Name
@@ -87,13 +88,17 @@ actions:
   - log: Setup ES cache server
   - cmd [es]: |-
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/elasticsearch.yml > /usr/share/elasticsearch/config/elasticsearch.yml
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/elasticsearch/config/jvm.options.yml
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/elasticsearch/config/jvm.options
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/log4j2.properties > /usr/share/elasticsearch/config/log4j2.properties
+      yum install -y epel-release &>> /var/log/run.log
+      yum update -y &>> /var/log/run.log
       yum install -y supervisor &>> /var/log/run.log
       systemctl enable supervisord &>> /var/log/run.log
       mkdir -p /var/log/supervisor
-      mkdir -p /etc/supervisor
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/supervisord.conf > /etc/supervisor/supervisord.conf
+      mkdir -p /var/log/elasticsearch
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/supervisord.conf > /etc/supervisord.conf
+      /usr/share/elasticsearch/bin/elasticsearch-plugin install analysis-icu &>> /var/log/run.log
+      /usr/share/elasticsearch/bin/elasticsearch-plugin install analysis-phonetic &>> /var/log/run.log
     user: root
     sayYes: true
   setupRD:
