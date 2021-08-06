@@ -89,7 +89,6 @@ actions:
   - cmd [es]: |-
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/elasticsearch.yml > /usr/share/elasticsearch/config/elasticsearch.yml
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/elasticsearch/config/jvm.options
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/log4j2.properties > /usr/share/elasticsearch/config/log4j2.properties
       yum install -y epel-release &>> /var/log/run.log
       yum update -y &>> /var/log/run.log
       yum install -y supervisor &>> /var/log/run.log
