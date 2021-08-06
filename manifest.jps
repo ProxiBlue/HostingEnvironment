@@ -71,7 +71,7 @@ nodes:
   diskLimit: 5G
   nodeGroup: es
   image: elasticsearch:7.9.3
-  entrypoint: /usr/bin/supervisord -c /etc/supervisord.conf
+  entrypoint: ["/usr/bin/supervisord","-c","/etc/supervisord.conf"]
 
 onInstall:
   - log: Set Node Display Name
