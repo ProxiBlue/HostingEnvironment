@@ -13,10 +13,10 @@ Layer                |     Server    | Number of CTs <br/> by default | Cloudlet
 -------------------- | --------------| :----------------------------: | :---------------------------------------: | :-----:
 CP                   |    NGINX      |       1                        |           20 / 74                          | -
 DB                   |    MarianDB   |       7                        |           20 / 74                          | -
-Elasticsearch        |    ES 7.9.3   |       1                        |           1 / 16                          | -
+Elasticsearch        |    ES 7.9.3 or 6.8   |       1                        |           1 / 16                          | -
 redis                |    6.0.6      |       1                        |           1 / 4                           | -
 
-**PHP Engine**: PHP 7.4<br/>
+**PHP Engine**: PHP 7.4 or 7.4<br/>
 **MariaDB Database**: 10.3.16<br/>
 **NGINX**: 1.18.0
 

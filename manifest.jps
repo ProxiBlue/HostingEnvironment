@@ -21,12 +21,28 @@ settings:
      type: text
      required: yes
      name: AMPLIFY_KEY
+  - caption: "PHP Version"
+    type: list
+    values:
+        1.18.0-php-7.4.16 : 7.4
+        1.18.0-php-7.3.21 : 7.3
+    required: true
+    name: PHP_VERSION
+    value: 1.18.0-php-7.4.16
+  - caption: "Elastic Search Version"
+    type: list
+    values:
+        7.9.3 : 7.9.3
+        6.8.18 : 6.8.18
+    required: true
+    name: ES_VERSION
+    value: 7.9.3
 
 skipNodeEmails: true
 
 nodes:
 - nodeType: nginxphp-dockerized
-  tag: 1.18.0-php-7.4.16
+  tag: ${settings.PHP_VERSION}
   count: 1
   cloudlets: 74
   extip: 1
@@ -71,7 +87,7 @@ nodes:
   displayName: Elastic Cache
   diskLimit: 100G
   nodeGroup: es
-  image: elasticsearch:7.9.3
+  image: elasticsearch:${settings.ES_VERSION}
   entrypoint: ["/usr/bin/supervisord","-c","/etc/supervisord.conf"]
 
 onInstall:
@@ -114,9 +130,11 @@ actions:
   - log: Setup Config files
   - cmd [cp]: |-
       curl -sL https://rpm.nodesource.com/setup_12.x | sudo bash - &>> /var/log/run.log
-      yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm &>> /var/log/run.log
-      yum install joe pv monit libsodium npm httpd-tools goaccess &>> /var/log/run.log
+      yum install epel-release &>> /var/log/run.log
+      yum update
+      yum install joe pv monit libsodium nodejs httpd-tools goaccess &>> /var/log/run.log
       systemctl stop monit &>> /var/log/run.log
+      mkdir -p /etc/monit.d/
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/nginxmonitor > /etc/monit.d/nginx
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/phpfpmmonitor > /etc/monit.d/phpfpm
       echo ${globals.NGINX_PASS}| passwd --stdin nginx &>> /var/log/run.log
@@ -148,7 +166,6 @@ actions:
       systemctl start monit &>> /var/log/run.log
       /etc/init.d/nginx restart &>> /var/log/run.log
       /etc/init.d/php-fpm restart &>> /var/log/run.log
-      curl -sL https://rpm.nodesource.com/setup_12.x | sudo bash - &>> /var/log/run.log
       wget http://www.rfxn.com/downloads/maldetect-current.tar.gz
       tar -xzf maldetect-current.tar.gz
       cd maldetect-1.6.4
@@ -182,7 +199,6 @@ actions:
       echo "5 8 * * 0 rm -rf /var/www/webroot/ROOT/pub/media/import/* 2>&1 >/dev/null" >> /var/spool/cron/nginx
       echo "*/5 * * * * cat /var/log/nginx/access.log | grep -v -f /var/www/webroot/ROOT/go_access_exclude_list.txt | goaccess -o /var/www/webroot/ROOT/pub/site_report.html --log-format=COMBINED - 2>&1 >/dev/null" >> /var/spool/cron/nginx
     user: nginx
-
   createDb:
   - cmd [sqldb]: |-
       wget https://raw.githubusercontent.com/jelastic-jps/mysql-cluster/master/scripts/setupUser.sh -O ~/setupUser.sh &>> /var/log/run.log
