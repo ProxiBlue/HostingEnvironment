@@ -10,6 +10,7 @@ globals:
   RD_PASS: ${fn.password(10)}
   NGINX_PASS: ${fn.password(10)}
   STATS_PASS: ${fn.password(10)}
+  MONIT_PASS: ${fn.password(10)}
 settings:
   fields:
   -  caption: Backup Email
@@ -110,16 +111,11 @@ actions:
     user: root
     sayYes: true
   setupCP:
-  - log: Setup Crons
-  - cmd [cp]: |-
-      echo "0 5 * * * /bin/bash /var/www/webroot/ROOT/backup/backup_to_s3.sh media 2>&1 >/var/www/webroot/ROOT/var/log/backups.log" >> /var/spool/cron/nginx
-      echo "5 8 * * 0 rm -rf /var/www/webroot/ROOT/pub/media/import/* 2>&1 >/dev/null" >> /var/spool/cron/nginx
-      echo "*/5 * * * * cat /var/log/nginx/access.log | grep -v -f /var/www/webroot/ROOT/go_access_exclude_list.txt | goaccess -o /var/www/webroot/ROOT/pub/site_report.html --log-format=COMBINED -"
-    user: nginx
   - log: Setup Config files
   - cmd [cp]: |-
+      curl -sL https://rpm.nodesource.com/setup_12.x | sudo bash - &>> /var/log/run.log
       yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm &>> /var/log/run.log
-      yum install joe pv monit libsodium &>> /var/log/run.log
+      yum install joe pv monit libsodium npm httpd-tools goaccess &>> /var/log/run.log
       systemctl stop monit &>> /var/log/run.log
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/nginxmonitor > /etc/monit.d/nginx
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/phpfpmmonitor > /etc/monit.d/phpfpm
@@ -153,18 +149,17 @@ actions:
       /etc/init.d/nginx restart &>> /var/log/run.log
       /etc/init.d/php-fpm restart &>> /var/log/run.log
       curl -sL https://rpm.nodesource.com/setup_12.x | sudo bash - &>> /var/log/run.log
-      yum install nodejs &>> /var/log/run.log
-      git clone https://github.com/ProxiBlue/baler.git &>> /var/log/run.log
-      cd baler &>> /var/log/run.log
-      npm install &>> /var/log/run.log
-      npm run build &>> /var/log/run.log
-      npm link &>> /var/log/run.log
       wget http://www.rfxn.com/downloads/maldetect-current.tar.gz
       tar -xzf maldetect-current.tar.gz
       cd maldetect-1.6.4
       /bin/bash ./install.sh
       cd ../
       rm -rf maldet*
+      git clone https://github.com/magento/baler.git &>> /var/log/run.log
+      cd baler &>> /var/log/run.log
+      npm install &>> /var/log/run.log
+      npm run build &>> /var/log/run.log
+      npm link &>> /var/log/run.log
       #rm -rf /usr/lib/node_modules/@magento/baler
       #mv /root/baler /usr/lib/node_modules/@magento/baler
       #chown root:nginx /usr/lib/node_modules/@magento/baler -R
@@ -172,13 +167,22 @@ actions:
       curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" &>> /var/log/run.log
       unzip awscliv2.zip &>> /var/log/run.log
       ./aws/install &>> /var/log/run.log
-      yum install goaccess  &>> /var/log/run.log
       curl -L -O https://github.com/nginxinc/nginx-amplify-agent/raw/master/packages/install.sh
       API_KEY='${settings.AMPLIFY_KEY}' sh ./install.sh
-      yum install -y httpd-tools
       htpasswd -b -c /etc/nginx/.htpasswd stats ${globals.STATS_PASS}
+      chown nginx:nginx /etc/nginx/.htpasswd
+      sed -i -e "/use address localhost/d" /etc/monitrc
+      sed -i -e "/allow localhost/d" /etc/monitrc
+      sed -i -e "/allow admin:monit/allow admin:${globals.MONIT_PASS}/" /etc/monitrc
     user: root
     sayYes: true
+  - log: Setup Non Root Parts
+  - cmd [cp]: |-
+      echo "0 5 * * * /bin/bash /var/www/webroot/ROOT/backup/backup_to_s3.sh media 2>&1 >/var/www/webroot/ROOT/var/log/backups.log" >> /var/spool/cron/nginx
+      echo "5 8 * * 0 rm -rf /var/www/webroot/ROOT/pub/media/import/* 2>&1 >/dev/null" >> /var/spool/cron/nginx
+      echo "*/5 * * * * cat /var/log/nginx/access.log | grep -v -f /var/www/webroot/ROOT/go_access_exclude_list.txt | goaccess -o /var/www/webroot/ROOT/pub/site_report.html --log-format=COMBINED - 2>&1 >/dev/null" >> /var/spool/cron/nginx
+    user: nginx
+
   createDb:
   - cmd [sqldb]: |-
       wget https://raw.githubusercontent.com/jelastic-jps/mysql-cluster/master/scripts/setupUser.sh -O ~/setupUser.sh &>> /var/log/run.log
@@ -216,3 +220,9 @@ success:
     ## STATS
 
     * stats / ${globals.STATS_PASS}
+
+    ## MONIT on port 2812
+
+        * admin / ${globals.MONIT_PASS}
+
+    ## Baler for js/css optimization/merging minification: https://github.com/magento/baler
