@@ -104,11 +104,14 @@ actions:
   setupES:
   - log: Setup ES cache server
   - cmd [es]: |-
+      yum-config-manager --save --setopt=fuzzyrpm.skip_if_unavailable=true
+      yum-config-manager --save --setopt=fuzzyrpm-noarch.skip_if_unavailable=true
+
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/elasticsearch.yml > /usr/share/elasticsearch/config/elasticsearch.yml
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/elasticsearch/config/jvm.options
-      yum install -y epel-release &>> /var/log/run.log
-      yum update -y &>> /var/log/run.log
-      yum install -y supervisor &>> /var/log/run.log
+      yum --disablerepo=fuzzyrpm install -y epel-release &>> /var/log/run.log
+      yum --disablerepo=fuzzyrpm update -y &>> /var/log/run.log
+      yum --disablerepo=fuzzyrpm install -y supervisor &>> /var/log/run.log
       systemctl enable supervisord &>> /var/log/run.log
       mkdir -p /var/log/supervisor
       mkdir -p /var/log/elasticsearch
@@ -129,10 +132,12 @@ actions:
   setupCP:
   - log: Setup Config files
   - cmd [cp]: |-
+      yum-config-manager --save --setopt=fuzzyrpm.skip_if_unavailable=true
+      yum-config-manager --save --setopt=fuzzyrpm-noarch.skip_if_unavailable=true
       curl -sL https://rpm.nodesource.com/setup_12.x | sudo bash - &>> /var/log/run.log
-      yum install epel-release &>> /var/log/run.log
+      yum --disablerepo=fuzzyrpm install epel-release &>> /var/log/run.log
       yum update
-      yum install joe pv monit libsodium nodejs httpd-tools goaccess &>> /var/log/run.log
+      yum --disablerepo=fuzzyrpm install joe pv monit libsodium nodejs httpd-tools goaccess &>> /var/log/run.log
       systemctl stop monit &>> /var/log/run.log
       mkdir -p /etc/monit.d/
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/nginxmonitor > /etc/monit.d/nginx
