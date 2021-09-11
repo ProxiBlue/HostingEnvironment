@@ -62,7 +62,7 @@ nodes:
     BACKUP_FAIL_TO: ${settings.BACKUP_EMAIL}
 
 - nodeType: mysql5
-  count: 16
+  count: 1
   cloudlets: 28
   displayName: Database
   diskLimit: 200G
