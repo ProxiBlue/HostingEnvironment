@@ -61,7 +61,8 @@ nodes:
     BACKUP_FAIL_FROM: ${settings.BACKUP_EMAIL}
     BACKUP_FAIL_TO: ${settings.BACKUP_EMAIL}
 
-- nodeType: mysql5
+- nodeType: mariadb-dockerized
+  tag: 10.3.22
   count: 1
   cloudlets: 28
   displayName: Database
@@ -88,15 +89,7 @@ nodes:
 onInstall:
   - setNodeDisplayName [cp]: AppServer
   - setNodeDisplayName [sqldb]: DataBase
-  - prepareSqlDatabase:
-    - nodeGroup: sqldb
-      loginCredentials:
-        user: root
-        password: "${nodes.sqldb.password}"
-      newDatabaseName: magento
-      newDatabaseUser:
-        name: drupal
-        password: "${globals.DB_PASS}"
+  - setupDb
   - secureDb
   - SetupAccess
   - InstallCPYumPackages
@@ -119,6 +112,12 @@ actions:
       echo ${globals.NGINX_PASS}| passwd --stdin root &>> /var/log/run.log
     user: root
     sayYes: true
+  createDb:
+  - cmd [sqldb]: |-
+      wget https://raw.githubusercontent.com/jelastic-jps/mysql-cluster/master/scripts/setupUser.sh -O ~/setupUser.sh &>> /var/log/run.log
+      bash ~/setupUser.sh ${globals.DB_USER} ${globals.DB_PASS} &>> /var/log/run.log
+      mysql -u${globals.DB_USER} -p${globals.DB_PASS} -e "CREATE DATABASE IF NOT EXISTS magento;"
+    user: root
   secureDb:
   - cmd [sqldb]: |-
       sed -i 's/Require all granted/Require all denied/g' /etc/httpd/conf.d/phpMyAdmin-jel.conf
