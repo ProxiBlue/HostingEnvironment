@@ -60,10 +60,6 @@ nodes:
     REDIS_VERSION: 6.0.6
     BACKUP_FAIL_FROM: ${settings.BACKUP_EMAIL}
     BACKUP_FAIL_TO: ${settings.BACKUP_EMAIL}
-    JELASTIC_PORTS:
-        - 80
-        - 443
-        - 22
 
 - nodeType: mariadb-dockerized
   tag: 10.3.22
@@ -99,6 +95,10 @@ onInstall:
   - setupCP
   - setupRD
   - setupES
+  - restartNodes:
+      nodeGroup: cp
+      nodeGroup: es
+      nodeGroup: sqldb
 
 actions:
   setupES:
@@ -137,7 +137,7 @@ actions:
       curl -sL https://rpm.nodesource.com/setup_12.x | sudo bash - &>> /var/log/run.log
       yum --disablerepo=fuzzyrpm install epel-release &>> /var/log/run.log
       yum update
-      yum --disablerepo=fuzzyrpm install joe pv monit libsodium nodejs httpd-tools goaccess &>> /var/log/run.log
+      yum --disablerepo=fuzzyrpm install joe pv monit libsodium nodejs httpd-tools goaccess libwebp-tools &>> /var/log/run.log
       systemctl stop monit &>> /var/log/run.log
       mkdir -p /etc/monit.d/
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/nginxmonitor > /etc/monit.d/nginx
