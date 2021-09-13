@@ -232,7 +232,7 @@ actions:
       mkdir /var/www/webroot/site_report/
       echo "0 5 * * * /bin/bash /var/www/webroot/ROOT/backup/backup_to_s3.sh media 2>&1 >/var/www/webroot/ROOT/var/log/backups.log" >> /var/spool/cron/nginx
       echo "5 8 * * 0 rm -rf /var/www/webroot/ROOT/pub/media/import/* 2>&1 >/dev/null" >> /var/spool/cron/nginx
-      echo "*/5 * * * * cat /var/log/nginx/access.log | grep -v -f /var/www/webroot/ROOT/go_access_exclude_list.txt | goaccess -o /var/www/webroot/site_report/index.html --log-format=COMBINED - 2>&1 >/dev/null" >> /var/spool/cron/nginx
+      echo "0 1 * * * zcat /var/log/nginx/access.* | grep -v -f /var/www/webroot/ROOT/go_access_exclude_list.txt | goaccess -o /var/www/webroot/site_report/index.html --log-format=COMBINED - 2>&1 >/dev/null" >> /var/spool/cron/nginx
     user: nginx
 success:
   text: |
