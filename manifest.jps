@@ -195,6 +195,13 @@ actions:
       echo ${nodes.es.first.intIP} ES_MASTER >> /etc/hosts
       echo "export BACKUP_FAIL_FROM=${settings.BACKUP_EMAIL}" >> /etc/environment
       echo "export BACKUP_FAIL_TO=${settings.BACKUP_EMAIL}" >> /etc/environment
+      cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+      sed -i 's/findtime  = 10m/findtime = 50/g' /etc/fail2ban/jail.local
+      sed -i 's/maxretry = 5/maxretry = 3/g' /etc/fail2ban/jail.local
+      sed -i 's/destemail = root@localhost/destemail = ${settings.BACKUP_EMAIL}/g' /etc/fail2ban/jail.local
+      sed -i 's/action = %(action_)s/action = %(action_mwl)s/g' /etc/fail2ban/jail.local
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-badurls.conf > /etc/fail2ban/filter.d/nginx-badurls.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-badurls.conf > /etc/fail2ban/jail.d/nginx-badurls.conf
     user: root
     sayYes: true
   setupCPPackages:
@@ -227,6 +234,7 @@ actions:
       sed -i -e "s/allow admin:monit/allow admin:${globals.MONIT_PASS}/g" /etc/monitrc
       systemctl enable monit &>> /var/log/run.log
       systemctl start monit &>> /var/log/run.log
+      yum install fail2ban
     user: root
     sayYes: true
   setupCPNonRoot:
