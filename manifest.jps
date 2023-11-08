@@ -238,6 +238,7 @@ actions:
       systemctl enable monit &>> /var/log/run.log
       systemctl start monit &>> /var/log/run.log
       yum install fail2ban
+      systemctl enable fail2ban &>> /var/log/run.log
     user: root
     sayYes: true
   setupCPNonRoot:
