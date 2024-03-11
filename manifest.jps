@@ -168,6 +168,8 @@ actions:
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/nginxmonitor > /etc/monit.d/nginx
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/phpfpmmonitor > /etc/monit.d/phpfpm
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/extensions.ini > /etc/php.d/extensions.ini
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/assert_off.ini > /etc/php.d/assert_off.ini
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/error-level.ini > /etc/php.d/error-level.ini
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nginx.conf > /etc/nginx/nginx.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nossl.conf > /etc/nginx/conf.d/nossl.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/ssl.conf.disabled > /etc/nginx/conf.d/ssl.conf.disabled
