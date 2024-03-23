@@ -62,7 +62,7 @@ nodes:
     BACKUP_FAIL_TO: ${settings.BACKUP_EMAIL}
 
 - nodeType: mariadb-dockerized
-  tag: 10.3.22
+  tag: 10.4.30
   count: 1
   cloudlets: 28
   displayName: Database
