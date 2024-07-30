@@ -17,6 +17,7 @@ settings:
      type: text
      required: true
      name: BACKUP_EMAIL
+     value: "sales@proxiblue.com.au"
   -  caption: Amplify API KEY
      type: text
      required: yes
@@ -24,10 +25,10 @@ settings:
   - caption: "PHP Version"
     type: list
     values:
-        2.4.57-php-8.1.22 : 8.1
+        1.24.0-php-8.1.21 : 8.1
     required: true
     name: PHP_VERSION
-    value: 2.4.57-php-8.1.22
+    value: 1.24.0-php-8.1.21
   - caption: "Elastic Search Version"
     type: list
     values:
@@ -61,7 +62,7 @@ nodes:
     BACKUP_FAIL_TO: ${settings.BACKUP_EMAIL}
 
 - nodeType: mariadb-dockerized
-  tag: 10.3.22
+  tag: 10.4.29
   count: 1
   cloudlets: 28
   displayName: Database
