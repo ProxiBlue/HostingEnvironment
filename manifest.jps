@@ -25,7 +25,8 @@ settings:
   - caption: "PHP Version"
     type: list
     values:
-        1.24.0-php-8.1.21 : 8.1
+        1.24.0-php-8.1.21 : 8.1.21
+        1.24.0-php-8.2.8 : 8.2.8
     required: true
     name: PHP_VERSION
     value: 1.24.0-php-8.1.21
@@ -62,7 +63,7 @@ nodes:
     BACKUP_FAIL_TO: ${settings.BACKUP_EMAIL}
 
 - nodeType: mariadb-dockerized
-  tag: 10.4.29
+  tag: 10.4.32
   count: 1
   cloudlets: 28
   displayName: Database
@@ -169,6 +170,8 @@ actions:
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/nginxmonitor > /etc/monit.d/nginx
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/phpfpmmonitor > /etc/monit.d/phpfpm
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/extensions.ini > /etc/php.d/extensions.ini
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/assert_off.ini > /etc/php.d/assert_off.ini
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/error-level.ini > /etc/php.d/error-level.ini
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nginx.conf > /etc/nginx/nginx.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nossl.conf > /etc/nginx/conf.d/nossl.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/ssl.conf.disabled > /etc/nginx/conf.d/ssl.conf.disabled
