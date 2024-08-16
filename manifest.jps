@@ -127,8 +127,6 @@ actions:
   setupES:
   - log: Setup ES cache server
   - cmd [es]: |-
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/elasticsearch.yml > /usr/share/elasticsearch/config/elasticsearch.yml
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/elasticsearch/config/jvm.options
       yum install -y epel-release &>> /var/log/run.log
       yum update -y &>> /var/log/run.log
       yum install -y supervisor &>> /var/log/run.log
@@ -138,6 +136,8 @@ actions:
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/supervisord.conf > /etc/supervisord.conf
       /usr/share/elasticsearch/bin/elasticsearch-plugin install analysis-icu &>> /var/log/run.log
       /usr/share/elasticsearch/bin/elasticsearch-plugin install analysis-phonetic &>> /var/log/run.log
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/elasticsearch.yml > /usr/share/elasticsearch/config/elasticsearch.yml
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/elasticsearch/config/jvm.options
     user: root
     sayYes: true
   setupRD:
@@ -169,6 +169,7 @@ actions:
       mkdir -p /etc/monit.d/
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/nginxmonitor > /etc/monit.d/nginx
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/phpfpmmonitor > /etc/monit.d/phpfpm
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/custom.ini > /etc/php.d/custom.ini
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/extensions.ini > /etc/php.d/extensions.ini
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/assert_off.ini > /etc/php.d/assert_off.ini
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/error-level.ini > /etc/php.d/error-level.ini
