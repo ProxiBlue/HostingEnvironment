@@ -25,11 +25,11 @@ settings:
   - caption: "PHP Version"
     type: list
     values:
-        1.24.0-php-8.1.21 : 8.1.21
+        1.24.0-php-8.1.20 : 8.1.20
         1.24.0-php-8.2.8 : 8.2.8
     required: true
     name: PHP_VERSION
-    value: 1.24.0-php-8.1.21
+    value: 1.24.0-php-8.1.20
   - caption: "Elastic Search Version"
     type: list
     values:
