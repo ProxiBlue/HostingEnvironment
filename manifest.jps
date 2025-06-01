@@ -203,6 +203,8 @@ actions:
       sed -i 's/action = %(action_)s/action = %(action_mwl)s/g' /etc/fail2ban/jail.local
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-badurls.conf > /etc/fail2ban/filter.d/nginx-badurls.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-badurls.conf > /etc/fail2ban/jail.d/nginx-badurls.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-search.conf > /etc/fail2ban/filter.d/nginx-search.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-search.conf > /etc/fail2ban/jail.d/nginx-search.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/fail2banUpdate.sh > /root/fail2banUpdate.sh
       echo "0 5 * * * /bin/bash /root/fail2banUpdate.sh >/var/log/fail2ban.log" >> /var/spool/cron/root
     user: root
