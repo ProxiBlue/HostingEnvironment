@@ -74,3 +74,5 @@ Open Source Malware detection cli
 ## Baler
 
 * https://github.com/magento/baler
+
+List of PHP images: https://hub.docker.com/r/jelastic/nginxphp/tags
