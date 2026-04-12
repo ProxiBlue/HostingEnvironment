@@ -17,27 +17,22 @@ settings:
      type: text
      required: true
      name: BACKUP_EMAIL
-     value: "sales@proxiblue.com.au"
-  -  caption: Amplify API KEY
-     type: text
-     required: yes
-     name: AMPLIFY_KEY
+     value: ""
   - caption: "PHP Version"
     type: list
     values:
-        1.24.0-php-8.1.20 : 8.1.20
-        1.24.0-php-8.2.8 : 8.2.8
+        1.28.0-php-8.3.24-almalinux-9 : 8.3.24
     required: true
     name: PHP_VERSION
-    value: 1.24.0-php-8.1.20
-  - caption: "Elastic Search Version"
+    value: 1.28.0-php-8.3.24-almalinux-9
+  - caption: "OpenSearch Version"
     type: list
     values:
-        7.9.3 : 7.9.3
-        6.8.18 : 6.8.18
+        2.19.5 : 2.19.5
+        3.6.0 : 3.6.0
     required: true
-    name: ES_VERSION
-    value: 7.9.3
+    name: OS_VERSION
+    value: 2.19.5
 
 skipNodeEmails: true
 
@@ -58,12 +53,11 @@ nodes:
   env:
     PHPFPM_MAX_CHILDREN: 1000
     REDIS_ENABLED: 1
-    REDIS_VERSION: 6.0.6
     BACKUP_FAIL_FROM: ${settings.BACKUP_EMAIL}
     BACKUP_FAIL_TO: ${settings.BACKUP_EMAIL}
 
 - nodeType: mariadb-dockerized
-  tag: 10.4.32
+  tag: 11.4-almalinux-9
   count: 1
   cloudlets: 28
   displayName: Database
@@ -71,7 +65,7 @@ nodes:
   nodeGroup: sqldb
 
 - nodeType: redis
-  tag: 6.0.6
+  tag: 7.2.4-almalinux-9
   count: 1
   cloudlets: 28
   displayName: Redis for Sessions
@@ -81,10 +75,13 @@ nodes:
 - nodeType: docker
   count: 1
   cloudlets: 28
-  displayName: Elastic Cache
+  displayName: OpenSearch
   diskLimit: 100G
   nodeGroup: es
-  image: elasticsearch:${settings.ES_VERSION}
+  image: opensearchproject/opensearch:${settings.OS_VERSION}
+  env:
+    DISABLE_INSTALL_DEMO_CONFIG: "true"
+    OPENSEARCH_JAVA_OPTS: "-Xms4g -Xmx4g"
   entrypoint: ["/usr/bin/supervisord","-c","/etc/supervisord.conf"]
 
 onInstall:
@@ -92,7 +89,9 @@ onInstall:
   - setNodeDisplayName [sqldb]: DataBase
   - createDb
   - secureDb
+  - hardenDb
   - SetupAccess
+  - lockdownSSH
   - InstallCPYumPackages
   - setupCPConfigs
   - setupCPPackages
@@ -104,6 +103,7 @@ onInstall:
       - cp
       - es
       - nosqldb
+  - installSSL
 
 actions:
   SetupAccess:
@@ -111,6 +111,18 @@ actions:
   - cmd [cp]: |-
       echo ${globals.NGINX_PASS}| passwd --stdin nginx &>> /var/log/run.log
       echo ${globals.NGINX_PASS}| passwd --stdin root &>> /var/log/run.log
+    user: root
+    sayYes: true
+  lockdownSSH:
+  - log: Block all external SSH - use Jelastic web SSH portal only
+  - cmd [cp, sqldb, nosqldb, es]: |-
+      echo '*filter' > /etc/sysconfig/iptables-custom
+      echo '-A INPUT -s 10.0.0.0/8 -p tcp -m tcp --dport 22 -j ACCEPT' >> /etc/sysconfig/iptables-custom
+      echo '-A INPUT -s 172.16.0.0/12 -p tcp -m tcp --dport 22 -j ACCEPT' >> /etc/sysconfig/iptables-custom
+      echo '-A INPUT -s 192.168.0.0/16 -p tcp -m tcp --dport 22 -j ACCEPT' >> /etc/sysconfig/iptables-custom
+      echo '-A INPUT -p tcp -m tcp --dport 22 -j DROP' >> /etc/sysconfig/iptables-custom
+      echo 'COMMIT' >> /etc/sysconfig/iptables-custom
+      /usr/bin/jem firewall fwstart 2>/dev/null || iptables-restore --noflush < /etc/sysconfig/iptables-custom
     user: root
     sayYes: true
   createDb:
@@ -124,20 +136,45 @@ actions:
       sed -i 's/Require all granted/Require all denied/g' /etc/httpd/conf.d/phpMyAdmin-jel.conf
       echo ${globals.NGINX_PASS}| passwd --stdin root &>> /var/log/run.log
     user: root
+  hardenDb:
+  - log: Harden MariaDB configuration
+  - cmd [sqldb]: |-
+      cat >> /etc/my.cnf << 'DBEOF'
+
+      [mysqld]
+      skip-symbolic-links = 1
+      local-infile = 0
+      bind-address = 0.0.0.0
+      max_allowed_packet = 128M
+      log_error = /var/log/mysql/error.log
+      DBEOF
+      mkdir -p /var/log/mysql
+      chown mysql:mysql /var/log/mysql
+      systemctl restart mysql &>> /var/log/run.log
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/logrotate/mariadb > /etc/logrotate.d/mariadb
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/healthchecks/check_mariadb.sh > /root/check_mariadb.sh
+      chmod +x /root/check_mariadb.sh
+      echo "*/2 * * * * /bin/bash /root/check_mariadb.sh" >> /var/spool/cron/root
+    user: root
+    sayYes: true
   setupES:
-  - log: Setup ES cache server
+  - log: Setup OpenSearch server
   - cmd [es]: |-
       yum install -y epel-release &>> /var/log/run.log
       yum update -y &>> /var/log/run.log
       yum install -y supervisor &>> /var/log/run.log
       systemctl enable supervisord &>> /var/log/run.log
       mkdir -p /var/log/supervisor
-      mkdir -p /var/log/elasticsearch
+      mkdir -p /var/log/opensearch
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/supervisord.conf > /etc/supervisord.conf
-      /usr/share/elasticsearch/bin/elasticsearch-plugin install analysis-icu &>> /var/log/run.log
-      /usr/share/elasticsearch/bin/elasticsearch-plugin install analysis-phonetic &>> /var/log/run.log
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/elasticsearch.yml > /usr/share/elasticsearch/config/elasticsearch.yml
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/elasticsearch/config/jvm.options
+      /usr/share/opensearch/bin/opensearch-plugin install analysis-icu &>> /var/log/run.log
+      /usr/share/opensearch/bin/opensearch-plugin install analysis-phonetic &>> /var/log/run.log
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/opensearch.yml > /usr/share/opensearch/config/opensearch.yml
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/opensearch/config/jvm.options
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/logrotate/opensearch > /etc/logrotate.d/opensearch
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/healthchecks/check_opensearch.sh > /root/check_opensearch.sh
+      chmod +x /root/check_opensearch.sh
+      echo "*/2 * * * * /bin/bash /root/check_opensearch.sh" >> /var/spool/cron/root
     user: root
     sayYes: true
   setupRD:
@@ -147,20 +184,20 @@ actions:
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/restart.conf > /etc/systemd/system/redis.service.d/restart.conf &>> /var/log/run.log
       systemctl daemon-reload &>> /var/log/run.log
       systemctl restart redis &>> /var/log/run.log
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/healthchecks/check_redis_sessions.sh > /root/check_redis_sessions.sh
+      chmod +x /root/check_redis_sessions.sh
+      echo "*/2 * * * * /bin/bash /root/check_redis_sessions.sh" >> /var/spool/cron/root
     user: root
     sayYes: true
   InstallCPYumPackages:
   - log: Setup Yum packages
   - cmd [cp]: |-
       yum update
-      curl -sL https://rpm.nodesource.com/setup_12.x | sudo bash - &>> /var/log/run.log
-      curl --silent --location https://dl.yarnpkg.com/rpm/yarn.repo | sudo tee /etc/yum.repos.d/yarn.repo
-      rpm --import https://dl.yarnpkg.com/rpm/pubkey.gpg
-      yum install nodejs &>> /var/log/run.log
+      curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - &>> /var/log/run.log
+      yum install -y nodejs &>> /var/log/run.log
       yum install epel-release &>> /var/log/run.log
       yum update
-      yum install -y joe pv monit libsodium httpd-tools goaccess yarn libwebp-tools &>> /var/log/run.log
-      yarn global add magepack &>> /var/log/run.log
+      yum install -y joe pv monit libsodium httpd-tools goaccess libwebp-tools &>> /var/log/run.log
     user: root
     sayYes: true
   setupCPConfigs:
@@ -169,6 +206,7 @@ actions:
       mkdir -p /etc/monit.d/
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/nginxmonitor > /etc/monit.d/nginx
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/phpfpmmonitor > /etc/monit.d/phpfpm
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/redismonitor > /etc/monit.d/redis
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/custom.ini > /etc/php.d/custom.ini
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/extensions.ini > /etc/php.d/extensions.ini
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/assert_off.ini > /etc/php.d/assert_off.ini
@@ -198,40 +236,29 @@ actions:
       cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
       sed -i 's/findtime  = 10m/findtime = 50/g' /etc/fail2ban/jail.local
       sed -i 's/maxretry = 5/maxretry = 3/g' /etc/fail2ban/jail.local
-      sed -i 's/sender = root@<fq-hostname>/sender = sales@proxiblue.com.au/g' /etc/fail2ban/jail.local
+      sed -i 's/sender = root@<fq-hostname>/sender = ${settings.BACKUP_EMAIL}/g' /etc/fail2ban/jail.local
       sed -i 's/destemail = root@localhost/destemail = ${settings.BACKUP_EMAIL}/g' /etc/fail2ban/jail.local
       sed -i 's/action = %(action_)s/action = %(action_mwl)s/g' /etc/fail2ban/jail.local
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-badurls.conf > /etc/fail2ban/filter.d/nginx-badurls.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-badurls.conf > /etc/fail2ban/jail.d/nginx-badurls.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-search.conf > /etc/fail2ban/filter.d/nginx-search.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-search.conf > /etc/fail2ban/jail.d/nginx-search.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-magento-admin.conf > /etc/fail2ban/filter.d/nginx-magento-admin.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-magento-admin.conf > /etc/fail2ban/jail.d/nginx-magento-admin.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/fail2banUpdate.sh > /root/fail2banUpdate.sh
       echo "0 5 * * * /bin/bash /root/fail2banUpdate.sh >/var/log/fail2ban.log" >> /var/spool/cron/root
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/logrotate/magento-stack > /etc/logrotate.d/magento-stack
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/healthchecks/check_magento_cron.sh > /root/check_magento_cron.sh
+      chmod +x /root/check_magento_cron.sh
+      echo "*/5 * * * * /bin/bash /root/check_magento_cron.sh" >> /var/spool/cron/root
     user: root
     sayYes: true
   setupCPPackages:
   - log: Setup Packages
   - cmd [cp]: |-
-      wget http://www.rfxn.com/downloads/maldetect-current.tar.gz
-      tar -xzf maldetect-current.tar.gz
-      cd maldetect-1.6.4
-      /bin/bash ./install.sh
-      cd ../
-      rm -rf maldet*
-      git clone https://github.com/magento/baler.git &>> /var/log/run.log
-      cd baler &>> /var/log/run.log
-      npm install &>> /var/log/run.log
-      npm run build &>> /var/log/run.log
-      npm link &>> /var/log/run.log
-      #rm -rf /usr/lib/node_modules/@magento/baler
-      #mv /root/baler /usr/lib/node_modules/@magento/baler
-      #chown root:nginx /usr/lib/node_modules/@magento/baler -R
-      #chmod +x /usr/lib/node_modules/@magento/baler/bin/baler
       curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" &>> /var/log/run.log
       unzip awscliv2.zip &>> /var/log/run.log
       ./aws/install &>> /var/log/run.log
-      curl -L -O https://github.com/nginxinc/nginx-amplify-agent/raw/master/packages/install.sh
-      API_KEY='${settings.AMPLIFY_KEY}' sh ./install.sh
       htpasswd -b -c /etc/nginx/.htpasswd stats ${globals.STATS_PASS}
       chown nginx:nginx /etc/nginx/.htpasswd
       sed -i -e "/use address localhost/d" /etc/monitrc
@@ -239,7 +266,7 @@ actions:
       sed -i -e "s/allow admin:monit/allow admin:${globals.MONIT_PASS}/g" /etc/monitrc
       systemctl enable monit &>> /var/log/run.log
       systemctl start monit &>> /var/log/run.log
-      yum install fail2ban
+      yum install -y fail2ban &>> /var/log/run.log
       systemctl enable fail2ban &>> /var/log/run.log
     user: root
     sayYes: true
@@ -251,6 +278,16 @@ actions:
       echo "5 8 * * 0 rm -rf /var/www/webroot/ROOT/pub/media/import/* 2>&1 >/dev/null" >> /var/spool/cron/nginx
       echo "0 1 * * * zcat /var/log/nginx/access*.gz | grep -v -f /var/www/webroot/ROOT/go_access_exclude_list.txt | goaccess -o /var/www/webroot/site_report/index.html --log-format=COMBINED - 2>&1 >/dev/null" >> /var/spool/cron/nginx
     user: nginx
+  installSSL:
+  - log: Install Let's Encrypt SSL addon
+  - install:
+      jps: https://github.com/jelastic-jps/lets-encrypt/blob/stage/manifest.jps?_r=${fn.random}
+      nodeGroup: cp
+      settings:
+        customDomains: ""
+        fallbackToX1: "true"
+        webroot: "true"
+        webrootPath: /var/www/webroot/ROOT/pub
 success:
   text: |
     ## Database: ${nodes.mariadb-dockerized.name}
@@ -269,7 +306,7 @@ success:
     * **Host**: ${nodes.cp.first.intIP} or just use: localhost on AppServer
     * **socket**: It is preferred to use the socket /tmp/redis.sock
 
-    ## Elastic Search
+    ## OpenSearch
 
     * **Host**: ${nodes.es.first.intIP} or just use: ES_MASTER
 
@@ -284,5 +321,3 @@ success:
     ## MONIT on port 2812
 
         * admin / ${globals.MONIT_PASS}
-
-    ## Baler for js/css optimization/merging minification: https://github.com/magento/baler

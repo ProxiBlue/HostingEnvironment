@@ -1,0 +1,10 @@
+/var/log/mysql/error.log
+{
+    weekly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

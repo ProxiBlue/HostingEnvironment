@@ -1,5 +1,5 @@
 discovery.type: single-node
 http.cors.enabled: true
 http.cors.allow-origin: /.*/
-xpack.security.enabled: false
+plugins.security.disabled: true
 network.host: 0.0.0.0
