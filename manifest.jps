@@ -92,9 +92,11 @@ onInstall:
   - hardenDb
   - SetupAccess
   - lockdownSSH
+  - removeDefaultSSHKeys
   - InstallCPYumPackages
   - setupCPConfigs
   - setupCPPackages
+  - setupCrowdSec
   - setupCPNonRoot
   - setupRD
   - setupES
@@ -111,6 +113,19 @@ actions:
   - cmd [cp]: |-
       echo ${globals.NGINX_PASS}| passwd --stdin nginx &>> /var/log/run.log
       echo ${globals.NGINX_PASS}| passwd --stdin root &>> /var/log/run.log
+    user: root
+    sayYes: true
+  removeDefaultSSHKeys:
+  - log: Remove Jelastic default shared SSH keys from all nodes
+  - cmd [cp, sqldb, nosqldb, es]: |-
+      for user_home in /root /var/lib/nginx /home/*; do
+        auth_file="${user_home}/.ssh/authorized_keys"
+        if [ -f "${auth_file}" ]; then
+          grep -v "jelastic" "${auth_file}" > "${auth_file}.tmp" || true
+          mv "${auth_file}.tmp" "${auth_file}"
+          chmod 600 "${auth_file}"
+        fi
+      done
     user: root
     sayYes: true
   lockdownSSH:
@@ -166,9 +181,13 @@ actions:
       systemctl enable supervisord &>> /var/log/run.log
       mkdir -p /var/log/supervisor
       mkdir -p /var/log/opensearch
+      mkdir -p /var/lib/opensearch
+      chown opensearch:opensearch /var/lib/opensearch
+      ln -sf /usr/share/opensearch/jdk /usr/java/latest
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/supervisord.conf > /etc/supervisord.conf
       /usr/share/opensearch/bin/opensearch-plugin install analysis-icu &>> /var/log/run.log
       /usr/share/opensearch/bin/opensearch-plugin install analysis-phonetic &>> /var/log/run.log
+      chattr -i /usr/share/opensearch/config/opensearch.yml 2>/dev/null || true
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/opensearch.yml > /usr/share/opensearch/config/opensearch.yml
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/opensearch/config/jvm.options
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/logrotate/opensearch > /etc/logrotate.d/opensearch
@@ -268,6 +287,22 @@ actions:
       systemctl start monit &>> /var/log/run.log
       yum install -y fail2ban &>> /var/log/run.log
       systemctl enable fail2ban &>> /var/log/run.log
+    user: root
+    sayYes: true
+  setupCrowdSec:
+  - log: Install and configure CrowdSec with firewall bouncer
+  - cmd [cp]: |-
+      curl -s https://install.crowdsec.net | bash &>> /var/log/run.log
+      yum install -y crowdsec crowdsec-firewall-bouncer-iptables &>> /var/log/run.log
+      cscli collections install crowdsecurity/nginx &>> /var/log/run.log
+      cscli collections install crowdsecurity/linux &>> /var/log/run.log
+      cscli collections install crowdsecurity/base-http-scenarios &>> /var/log/run.log
+      cscli collections install crowdsecurity/http-cve &>> /var/log/run.log
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/crowdsec/acquis.yaml > /etc/crowdsec/acquis.yaml
+      systemctl enable crowdsec &>> /var/log/run.log
+      systemctl start crowdsec &>> /var/log/run.log
+      systemctl enable crowdsec-firewall-bouncer &>> /var/log/run.log
+      systemctl start crowdsec-firewall-bouncer &>> /var/log/run.log
     user: root
     sayYes: true
   setupCPNonRoot:

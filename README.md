@@ -72,6 +72,8 @@ All three monitored via Monit with memory thresholds (NGINX > 1GB, PHP-FPM > 3GB
 
 All external SSH (port 22) is blocked on every node at provisioning time via iptables. Only Jelastic internal networks (RFC1918) are permitted, so SSH access is exclusively through the Jelastic web SSH portal.
 
+**Jelastic default SSH keys** are removed from all nodes at provisioning. The platform ships a shared key across all containers — this is replaced with project-specific keys only.
+
 ### NGINX
 
 - **Rate limiting** on admin panel (5r/s), customer login (2r/s), and REST/GraphQL API (10r/s)
@@ -87,8 +89,8 @@ All external SSH (port 22) is blocked on every node at provisioning time via ipt
 
 - `expose_php = Off` - hides PHP version from headers
 - `allow_url_include = Off` - prevents remote file inclusion
-- `open_basedir` restricted to Magento root and `/tmp`
-- `disable_functions` - `passthru`, `proc_open`, `popen`
+- `open_basedir` restricted to Magento root, `/tmp`, composer cache (`/var/lib/nginx/.composer`), and PHP binary path (`/usr/lib64/jelastic_php`)
+- `disable_functions` - `passthru` (note: `proc_open`/`popen` are required by Composer and `setup:di:compile`)
 - Secure session cookies: `httponly`, `secure`, `samesite=Lax`, `strict_mode`
 - `request_terminate_timeout = 600s` - kills runaway PHP processes
 - `request_slowlog_timeout = 30s` - logs slow requests to `/var/log/nginx/php-fpm.slow.log`
@@ -117,6 +119,14 @@ All external SSH (port 22) is blocked on every node at provisioning time via ipt
 | `nginx-magento-admin` | Admin/customer login brute-force | 5 hits in 5min = 1 hour ban |
 
 All filters auto-update daily from the repo via `fail2banUpdate.sh`.
+
+**CrowdSec** with iptables firewall bouncer:
+
+- Parses nginx access/error logs and `/var/log/secure` in real-time
+- Blocks malicious IPs at the iptables level before requests reach nginx
+- Installed collections: `crowdsecurity/nginx`, `crowdsecurity/linux`, `crowdsecurity/base-http-scenarios`, `crowdsecurity/http-cve`
+- Shares threat intelligence with the CrowdSec community blocklist
+- Works alongside fail2ban — fail2ban handles Magento-specific patterns, CrowdSec handles broader threat detection and CVE-based attacks
 
 ### SSL
 
@@ -160,6 +170,145 @@ Installed for S3 backup operations. Configure credentials with `aws configure`.
 ### Node.js 20 LTS (AppServer)
 
 Installed for Hyva theme Tailwind CSS compilation. Run `npm ci` in your theme's `web/tailwind` directory.
+
+## Post-Provisioning Verification Checklist
+
+After the JPS manifest runs, verify each fix was applied correctly. These address known Jelastic default configuration issues discovered during the April 2026 migration.
+
+### App Node (cp)
+
+**1. Verify Jelastic default SSH keys are removed**
+```bash
+# On each node (cp, sqldb, nosqldb, es):
+cat /root/.ssh/authorized_keys
+cat /var/lib/nginx/.ssh/authorized_keys  # cp node only
+# Should NOT contain any key with "jelastic" in the comment
+```
+
+**2. Verify PHP `proc_open`/`popen` are NOT disabled**
+```bash
+php -i | grep disable_functions
+# Should show only: passthru
+# If proc_open or popen appear, edit /etc/php.d/custom.ini
+```
+
+**3. Verify PHP `open_basedir` includes composer cache and PHP binary path**
+```bash
+php -i | grep open_basedir
+# Must include: /var/lib/nginx/.composer and /usr/lib64/jelastic_php
+# Test: php -r "var_dump(is_dir('/var/lib/nginx/.composer'));"  # should not error
+```
+
+**4. Verify nginx blocks PHP execution in media upload directories**
+```bash
+curl -s -o /dev/null -w "%{http_code}" https://YOURDOMAIN/media/customer_address/test.php
+# Should return 403
+curl -s -o /dev/null -w "%{http_code}" https://YOURDOMAIN/media/customer/test.php
+# Should return 403
+curl -s -o /dev/null -w "%{http_code}" https://YOURDOMAIN/media/import/test.php
+# Should return 403
+```
+
+**5. Verify deploy script does not reference `pub/index.php.live`**
+```bash
+grep -r "index.php.live" /var/www/webroot/
+# Should return no results. If found, update the deploy script — store routing
+# is now handled in the main pub/index.php.
+```
+
+**6. Verify CrowdSec is running with firewall bouncer**
+```bash
+systemctl status crowdsec
+# Should be active (running)
+systemctl status crowdsec-firewall-bouncer
+# Should be active (running)
+cscli bouncers list
+# Should show the firewall bouncer as connected
+cscli collections list | grep -E "nginx|linux|base-http|http-cve"
+# Should show all four collections installed and enabled
+cscli metrics
+# Should show log sources being parsed (may take a minute after startup)
+```
+
+### OpenSearch Node (es)
+
+**7. Verify data directory exists and is writable**
+```bash
+ls -la /var/lib/opensearch
+# Should exist and be owned by opensearch:opensearch
+```
+
+**8. Verify Java symlink**
+```bash
+ls -la /usr/java/latest
+# Should be a symlink to /usr/share/opensearch/jdk
+java -version
+# Should return the bundled OpenSearch JDK version
+```
+
+**9. Verify opensearch.yml is not immutable and has correct config**
+```bash
+lsattr /usr/share/opensearch/config/opensearch.yml
+# Should NOT show 'i' flag (immutable)
+grep "plugins.security.disabled" /usr/share/opensearch/config/opensearch.yml
+# Should show: plugins.security.disabled: true
+grep "discovery.type" /usr/share/opensearch/config/opensearch.yml
+# Should show: discovery.type: single-node
+```
+
+**10. Verify analysis plugins are installed**
+```bash
+/usr/share/opensearch/bin/opensearch-plugin list
+# Must include: analysis-icu, analysis-phonetic
+# Without these, ElasticSuite catalog search indexing fails with:
+#   "Unknown filter type [phonetic]"
+```
+
+**11. Verify OpenSearch is running and healthy**
+```bash
+curl -s http://localhost:9200/_cluster/health | python3 -m json.tool
+# status should be "green" or "yellow" (not "red")
+```
+
+### Redis Node (nosqldb)
+
+**12. Verify protected mode is disabled**
+```bash
+redis-cli CONFIG GET protected-mode
+# Should return: protected-mode no
+# If "yes", connections from the app node will be refused
+```
+
+**13. Test connectivity from the app node**
+```bash
+# From the cp node:
+redis-cli -h RD_MASTER ping
+# Should return: PONG
+```
+
+### Database (sqldb)
+
+**14. Verify MariaDB version compatibility**
+```bash
+mysql --version
+# If MariaDB 12.x, you need the composer patch at:
+#   patches/composer/allow-mariadb-12.patch
+# This adds ^12\. to the SqlVersionProvider DI config in Mage-OS.
+# Apply in the Magento project root:
+#   composer patch patches/composer/allow-mariadb-12.patch
+```
+
+### Quick Smoke Test
+
+After all verifications pass, run a full deploy cycle on the app node:
+```bash
+# As nginx user on the cp node:
+cd /var/www/webroot/ROOT
+composer install --no-dev
+bin/magento setup:di:compile       # needs proc_open
+bin/magento setup:static-content:deploy
+bin/magento cache:flush
+```
 
 ## Post-Deploy Tasks
 
