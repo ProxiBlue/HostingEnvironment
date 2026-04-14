@@ -76,7 +76,7 @@ All external SSH (port 22) is blocked on every node at provisioning time via ipt
 
 ### NGINX
 
-- **Rate limiting** on admin panel (5r/s), customer login (2r/s), and REST/GraphQL API (10r/s)
+- **Rate limiting** on admin panel (30r/s), customer login (2r/s), and REST/GraphQL API (10r/s)
 - **Connection limiting** at 50 concurrent connections per IP
 - **Security headers**: `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options`
 - **PHP execution whitelisting** - only `index.php`, `get.php`, `static.php`, `health_check.php`, and error handlers can execute

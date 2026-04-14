@@ -1,6 +1,6 @@
 check process php-fpm with pidfile /var/run/php-fpm.pid
     start program = "/usr/bin/systemctl start php-fpm"
     stop program = "/usr/bin/systemctl stop php-fpm"
-    if failed unixsocket /var/run/php-fpm.socket then restart
+    if failed unixsocket /var/run/php-fpm.socket for 3 cycles then restart
     if 5 restarts within 5 cycles then alert
-    if totalmem > 3 GB for 5 cycles then restart
+    if totalmem > 10 GB for 5 cycles then restart
