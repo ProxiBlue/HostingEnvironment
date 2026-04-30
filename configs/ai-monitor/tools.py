@@ -6,6 +6,16 @@ arguments to subprocess calls are always literal lists.
 """
 from __future__ import annotations
 
+# Swap stdlib sqlite3 for pysqlite3-binary BEFORE any crewai/chromadb import.
+# AlmaLinux 9 ships sqlite 3.34.x; chromadb (a crewai transitive dep) needs
+# >=3.35. pysqlite3-binary bundles a fresh build.
+try:
+    import pysqlite3  # type: ignore
+    import sys as _sys
+    _sys.modules["sqlite3"] = pysqlite3
+except ImportError:
+    pass
+
 import json
 import os
 import re

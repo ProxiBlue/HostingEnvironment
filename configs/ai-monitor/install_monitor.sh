@@ -94,10 +94,13 @@ build_venv() {
   "$INSTALL_DIR/venv/bin/pip" install --no-cache-dir --upgrade pip wheel
   # crewai bundles litellm; litellm talks to Gemini directly via the gemini/ prefix,
   # so we don't need google-generativeai as a separate dep.
+  # pysqlite3-binary bundles a current sqlite (>=3.35) so chromadb (transitive
+  # dep of crewai) loads on AlmaLinux 9 / RHEL 9 (system sqlite is 3.34.x).
   "$INSTALL_DIR/venv/bin/pip" install --no-cache-dir \
       "crewai>=0.80,<1" \
       "pyyaml>=6" \
-      "croniter>=2"
+      "croniter>=2" \
+      "pysqlite3-binary"
 }
 
 write_config() {

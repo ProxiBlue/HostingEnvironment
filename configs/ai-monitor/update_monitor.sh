@@ -30,7 +30,8 @@ log "refreshing pip dependencies"
 "$INSTALL_DIR/venv/bin/pip" install --no-cache-dir --upgrade \
     "crewai>=0.80,<1" \
     "pyyaml>=6" \
-    "croniter>=2"
+    "croniter>=2" \
+    "pysqlite3-binary"
 
 if [ ! -f "$CONFIG_DIR/config.yaml" ]; then
   log "no config.yaml found, copying template (you must edit it)"

@@ -8,6 +8,16 @@ reports a best-effort status.
 """
 from __future__ import annotations
 
+# Swap stdlib sqlite3 for pysqlite3-binary BEFORE any crewai/chromadb import
+# (RHEL 9 sqlite is 3.34.x; chromadb needs >=3.35). Same shim as tools.py;
+# either entry path is safe.
+try:
+    import pysqlite3  # type: ignore
+    import sys as _sys
+    _sys.modules["sqlite3"] = pysqlite3
+except ImportError:
+    pass
+
 import argparse
 import json
 import os
