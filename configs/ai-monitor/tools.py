@@ -260,6 +260,7 @@ def check_backups() -> str:
 
 @tool("zombie_processes")
 def zombie_processes() -> str:
+    """Count and list zombie/defunct processes on the host."""
     out = _run(["ps", "-eo", "stat,pid,ppid,cmd"])
     zombies = [l for l in out.splitlines() if l.startswith("Z")]
     return json.dumps({"zombies": zombies, "count": len(zombies)})
