@@ -8,3 +8,8 @@ filenames:
   - /var/log/secure
 labels:
   type: syslog
+---
+filenames:
+  - /var/www/webroot/ROOT/var/log/crowdsec-events.log
+labels:
+  type: magento-extension

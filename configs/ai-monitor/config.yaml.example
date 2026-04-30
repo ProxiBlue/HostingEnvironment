@@ -1,0 +1,39 @@
+# /etc/server-monitor/config.yaml
+# Edit and restart cron picks it up automatically (no daemon to reload).
+
+# Required: Google AI Studio key (free tier works). Leave empty to disable
+# the agent entirely - it will exit 0 and log "disabled" each run.
+gemini_api_key: ""
+
+# Which app stack lives on this server. Options: magento, drupal, both
+server_type: magento
+
+# Friendly name for log entries / alerts.
+server_name: ""   # falls back to `hostname` if blank
+
+# Cron schedule expression. The installer writes this into /etc/cron.d/server-monitor.
+# Default: every 4 hours.
+schedule: "0 */4 * * *"
+
+# Risk level at which an email alert is sent (in addition to JSON log).
+# One of: LOW, MEDIUM, HIGH, CRITICAL. Set to CRITICAL to alert only on the
+# worst findings, or NONE to disable email alerts entirely.
+alert_threshold: HIGH
+alert_email: ""
+
+# Gemini model. gemini-1.5-flash and gemini-2.0-flash-exp are on free tier.
+model: "gemini/gemini-1.5-flash"
+
+# Max wall-clock seconds for a single agent run before we abort and log a
+# timeout entry. Keeps cron jobs from piling up.
+run_timeout_seconds: 300
+
+# Which agents to run. Drop one to skip it.
+agents:
+  - security
+  - health
+  - application
+
+# Output / logging
+log_file: /var/log/server-monitor.log
+cache_file: /var/lib/server-monitor/last-result.json

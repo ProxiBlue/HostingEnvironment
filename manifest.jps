@@ -33,6 +33,21 @@ settings:
     required: true
     name: OS_VERSION
     value: 2.19.2-openjdk-11.0.25-almalinux-9
+  - caption: "Gemini API Key (AI Monitor)"
+    type: string
+    required: false
+    name: GEMINI_API_KEY
+    value: ""
+    description: "Optional. Google AI Studio key for the AI server monitor. Leave blank to install the agent disabled; set later in /etc/server-monitor/config.yaml."
+  - caption: "AI Monitor Schedule"
+    type: list
+    values:
+        "0 */4 * * *": "Every 4 hours (default)"
+        "0 */6 * * *": "Every 6 hours"
+        "0 2 * * *": "Daily at 02:00"
+    required: true
+    name: MONITOR_SCHEDULE
+    value: "0 */4 * * *"
 
 skipNodeEmails: true
 
@@ -97,6 +112,7 @@ onInstall:
   - setupCPConfigs
   - setupCPPackages
   - setupCrowdSec
+  - setupAIMonitor
   - setupCPNonRoot
   - setupRD
   - setupES
@@ -298,11 +314,29 @@ actions:
       cscli collections install crowdsecurity/linux &>> /var/log/run.log
       cscli collections install crowdsecurity/base-http-scenarios &>> /var/log/run.log
       cscli collections install crowdsecurity/http-cve &>> /var/log/run.log
+      cscli collections install crowdsecurity/magento &>> /var/log/run.log
+      cscli collections install crowdsecurity/appsec-virtual-patching &>> /var/log/run.log
+      cscli appsec-configs install crowdsecurity/virtual-patching &>> /var/log/run.log
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/crowdsec/acquis.yaml > /etc/crowdsec/acquis.yaml
       systemctl enable crowdsec &>> /var/log/run.log
       systemctl start crowdsec &>> /var/log/run.log
       systemctl enable crowdsec-firewall-bouncer &>> /var/log/run.log
       systemctl start crowdsec-firewall-bouncer &>> /var/log/run.log
+      cscli bouncers add magento-bouncer -o raw > /root/crowdsec-magento-bouncer-key.txt 2>/dev/null
+      echo "0 4 * * * /usr/local/bin/cscli hub update && /usr/local/bin/cscli hub upgrade --force 2>&1 | logger -t crowdsec-hub-update" >> /var/spool/cron/root
+    user: root
+    sayYes: true
+  setupAIMonitor:
+  - log: Install AI server monitor (CrewAI + Gemini, cron-driven, outbound only)
+  - cmd [cp]: |-
+      export GEMINI_API_KEY='${settings.GEMINI_API_KEY}'
+      export SERVER_TYPE='magento'
+      export MONITOR_SCHEDULE='${settings.MONITOR_SCHEDULE}'
+      export ALERT_EMAIL='${settings.BACKUP_EMAIL}'
+      export REPO_BASE_URL='https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/ai-monitor'
+      curl -fsSL "$REPO_BASE_URL/install_monitor.sh" -o /tmp/install_monitor.sh
+      chmod +x /tmp/install_monitor.sh
+      bash /tmp/install_monitor.sh &>> /var/log/run.log
     user: root
     sayYes: true
   setupCPNonRoot:
@@ -356,3 +390,17 @@ success:
     ## MONIT on port 2812
 
         * admin / ${globals.MONIT_PASS}
+
+    ## CrowdSec Magento Bouncer
+
+    * **API Key**: Saved to /root/crowdsec-magento-bouncer-key.txt on AppServer
+    * **LAPI URL**: http://127.0.0.1:8080
+    * Configure in Magento Admin: Stores > Configuration > Security > CrowdSec Bouncer
+
+    ## AI Server Monitor
+
+    * **Schedule**: ${settings.MONITOR_SCHEDULE} (cron on AppServer)
+    * **Config**: /etc/server-monitor/config.yaml
+    * **Log**: /var/log/server-monitor.log (one JSON entry per run)
+    * **Health check**: `/opt/server-monitor/venv/bin/python /opt/server-monitor/monitor_agent.py --health-check`
+    * If the Gemini API key was left blank during install, set `gemini_api_key:` in the config file - the agent runs in disabled mode until you do.
