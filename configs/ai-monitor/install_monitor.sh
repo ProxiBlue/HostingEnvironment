@@ -41,14 +41,33 @@ install_system_deps() {
   log "installing system deps via $pm"
   case "$pm" in
     dnf|yum)
-      $pm install -y python3 python3-pip python3-virtualenv mailx >/dev/null
+      # AlmaLinux/RHEL 9: default python3 is 3.9 - too old for crewai (needs 3.10+).
+      # Use python3.11 from AppStream. mailx was retired; s-nail provides /usr/bin/mail.
+      $pm install -y python3.11 python3.11-pip python3.11-devel gcc s-nail || {
+        log "python3.11 install failed, trying python3.12"
+        $pm install -y python3.12 python3.12-pip python3.12-devel gcc s-nail
+      }
       ;;
     apt)
-      DEBIAN_FRONTEND=noninteractive apt-get update -y >/dev/null
+      DEBIAN_FRONTEND=noninteractive apt-get update -y
       DEBIAN_FRONTEND=noninteractive apt-get install -y \
-          python3 python3-pip python3-venv mailutils curl >/dev/null
+          python3 python3-pip python3-venv mailutils curl gcc
       ;;
   esac
+}
+
+pick_python() {
+  # Need python >= 3.10 for crewai. Prefer newest available.
+  local cand
+  for cand in python3.12 python3.11 python3.10 python3; do
+    if command -v "$cand" >/dev/null 2>&1; then
+      local ver
+      ver="$("$cand" -c 'import sys;print(sys.version_info.major*100+sys.version_info.minor)')"
+      if [ "${ver:-0}" -ge 310 ]; then echo "$cand"; return 0; fi
+    fi
+  done
+  echo "[install_monitor] ERROR: no python >= 3.10 found (need it for crewai)" >&2
+  return 1
 }
 
 create_dirs() {
@@ -67,14 +86,16 @@ fetch_agent_files() {
 }
 
 build_venv() {
-  log "building virtualenv at $INSTALL_DIR/venv"
-  python3 -m venv "$INSTALL_DIR/venv"
+  local py
+  py="$(pick_python)"
+  log "building virtualenv at $INSTALL_DIR/venv using $py"
+  "$py" -m venv "$INSTALL_DIR/venv"
   # shellcheck disable=SC1091
-  "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip wheel
-  "$INSTALL_DIR/venv/bin/pip" install --quiet \
+  "$INSTALL_DIR/venv/bin/pip" install --no-cache-dir --upgrade pip wheel
+  # crewai bundles litellm; litellm talks to Gemini directly via the gemini/ prefix,
+  # so we don't need google-generativeai as a separate dep.
+  "$INSTALL_DIR/venv/bin/pip" install --no-cache-dir \
       "crewai>=0.80,<1" \
-      "google-generativeai>=0.7" \
-      "litellm>=1.50" \
       "pyyaml>=6" \
       "croniter>=2"
 }

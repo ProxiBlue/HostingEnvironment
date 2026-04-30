@@ -27,10 +27,8 @@ done
 chmod 0644 "$INSTALL_DIR"/*.py
 
 log "refreshing pip dependencies"
-"$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade \
+"$INSTALL_DIR/venv/bin/pip" install --no-cache-dir --upgrade \
     "crewai>=0.80,<1" \
-    "google-generativeai>=0.7" \
-    "litellm>=1.50" \
     "pyyaml>=6" \
     "croniter>=2"
 

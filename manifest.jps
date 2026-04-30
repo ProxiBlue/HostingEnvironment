@@ -336,7 +336,14 @@ actions:
       export REPO_BASE_URL='https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/ai-monitor'
       curl -fsSL "$REPO_BASE_URL/install_monitor.sh" -o /tmp/install_monitor.sh
       chmod +x /tmp/install_monitor.sh
-      bash /tmp/install_monitor.sh &>> /var/log/run.log
+      # Tee output to /var/log/run.log AND stdout so Jelastic captures errors.
+      # Non-fatal: a monitor install failure should not abort the server build.
+      bash /tmp/install_monitor.sh 2>&1 | tee -a /var/log/run.log
+      rc=${PIPESTATUS[0]}
+      if [ "$rc" -ne 0 ]; then
+        echo "WARNING: AI monitor install failed (exit $rc) - server build continues. Investigate /var/log/run.log on AppServer."
+      fi
+      exit 0
     user: root
     sayYes: true
   setupCPNonRoot:
