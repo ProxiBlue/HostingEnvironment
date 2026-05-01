@@ -1,0 +1,200 @@
+{
+  "name": "Server Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "={{ $env.N8N_MONITOR_SCHEDULE || '0 */4 * * *' }}"
+            }
+          ]
+        }
+      },
+      "id": "1a000000-0000-0000-0000-000000000001",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "sudo /usr/local/bin/n8n-server-snapshot.sh"
+      },
+      "id": "1a000000-0000-0000-0000-000000000002",
+      "name": "Gather Snapshot",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const snapshot = ($input.first().json.stdout || '').slice(0, 32000);\nconst hostname = $env.SERVER_HOSTNAME || 'unknown';\nconst prompt = [\n  `You are a senior SRE auditing a Magento 2 hosting server (${hostname}).`,\n  'Analyze the snapshot below for security incidents, capacity / health',\n  'issues, and Magento application errors. Be terse - prefer concrete',\n  'observations over speculation.',\n  '',\n  'Respond STRICTLY in this format and nothing else:',\n  '',\n  'RISK: <LOW|MEDIUM|HIGH|CRITICAL>',\n  'SUMMARY: <one sentence>',\n  'FINDINGS:',\n  '- <bullet>',\n  '- <bullet>',\n  '',\n  'Risk rubric:',\n  '- LOW: nothing actionable',\n  '- MEDIUM: degraded but stable (e.g. high disk usage, recurring app errors)',\n  '- HIGH: imminent outage risk or active attack pattern',\n  '- CRITICAL: outage in progress or compromise indicators',\n  '',\n  'Snapshot:',\n  '```',\n  snapshot,\n  '```'\n].join('\\n');\nreturn [{ json: { prompt, hostname } }];"
+      },
+      "id": "1a000000-0000-0000-0000-000000000003",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={{ $env.GEMINI_API_KEY }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [ { parts: [ { text: $json.prompt } ] } ], generationConfig: { temperature: 0.2, maxOutputTokens: 800 } }) }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "1a000000-0000-0000-0000-000000000004",
+      "name": "Call Gemini",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json || {};\nconst text = resp?.candidates?.[0]?.content?.parts?.[0]?.text || '';\nconst riskMatch = text.match(/RISK:\\s*(LOW|MEDIUM|HIGH|CRITICAL)/i);\nconst risk = riskMatch ? riskMatch[1].toUpperCase() : 'UNKNOWN';\nconst order = { UNKNOWN: 0, LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };\nconst hostname = $env.SERVER_HOSTNAME || 'unknown';\nconst body = text || JSON.stringify(resp).slice(0, 4000);\nreturn [{\n  json: {\n    risk_level: risk,\n    risk_score: order[risk] || 0,\n    analysis: body,\n    hostname,\n    timestamp: new Date().toISOString(),\n    bodyB64: Buffer.from(body, 'utf-8').toString('base64'),\n    subject: `[n8n monitor] ${risk} on ${hostname}`,\n    recipient: $env.ALERT_EMAIL || 'root'\n  }\n}];"
+      },
+      "id": "1a000000-0000-0000-0000-000000000005",
+      "name": "Parse Risk",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-risk-threshold",
+              "leftValue": "={{ $json.risk_score }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "1a000000-0000-0000-0000-000000000006",
+      "name": "Risk >= HIGH?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "command": "=echo '{{ $json.bodyB64 }}' | base64 -d | mail -s '{{ $json.subject }}' -- '{{ $json.recipient }}'"
+      },
+      "id": "1a000000-0000-0000-0000-000000000007",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1560, 220]
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [
+        [
+          {
+            "node": "Gather Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gather Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Gemini": {
+      "main": [
+        [
+          {
+            "node": "Parse Risk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Risk": {
+      "main": [
+        [
+          {
+            "node": "Risk >= HIGH?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Risk >= HIGH?": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "timezone": "UTC"
+  },
+  "tags": []
+}

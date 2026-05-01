@@ -33,13 +33,13 @@ settings:
     required: true
     name: OS_VERSION
     value: 2.19.2-openjdk-11.0.25-almalinux-9
-  - caption: "Gemini API Key (AI Monitor)"
+  - caption: "Gemini API Key (n8n monitor workflow)"
     type: string
     required: false
     name: GEMINI_API_KEY
     value: ""
-    description: "Optional. Google AI Studio key for the AI server monitor. Leave blank to install the agent disabled; set later in /etc/server-monitor/config.yaml."
-  - caption: "AI Monitor Schedule"
+    description: "Optional. Google AI Studio key. Leave blank to install n8n without a key; set it later by editing /etc/n8n/n8n.env and running 'systemctl restart n8n'."
+  - caption: "Monitor Workflow Schedule"
     type: list
     values:
         "0 */4 * * *": "Every 4 hours (default)"
@@ -48,6 +48,21 @@ settings:
     required: true
     name: MONITOR_SCHEDULE
     value: "0 */4 * * *"
+  - caption: "n8n UI IP Allowlist"
+    type: text
+    required: true
+    name: N8N_ALLOWED_IPS
+    value: ""
+    description: "Comma-separated CIDRs allowed to reach the n8n UI (e.g. '203.0.113.4/32, 198.51.100.0/24'). Leave blank only if you intend to edit /etc/nginx/conf.d/n8n.conf manually before exposing."
+  - caption: "n8n UI Port"
+    type: list
+    values:
+        "5679": "5679 (default)"
+        "8443": "8443"
+        "8080": "8080"
+    required: true
+    name: N8N_PORT
+    value: "5679"
 
 skipNodeEmails: true
 
@@ -112,7 +127,7 @@ onInstall:
   - setupCPConfigs
   - setupCPPackages
   - setupCrowdSec
-  - setupAIMonitor
+  - setupN8N
   - setupCPNonRoot
   - setupRD
   - setupES
@@ -326,20 +341,22 @@ actions:
       echo "0 4 * * * /usr/local/bin/cscli hub update && /usr/local/bin/cscli hub upgrade --force 2>&1 | logger -t crowdsec-hub-update" >> /var/spool/cron/root
     user: root
     sayYes: true
-  setupAIMonitor:
-  - log: Install AI server monitor (CrewAI + Gemini, cron-driven, outbound only)
+  setupN8N:
+  - log: Install self-hosted n8n (npm, sqlite, nginx-proxied on a separate port)
   - cmd [cp]: |-
       export GEMINI_API_KEY='${settings.GEMINI_API_KEY}'
-      export SERVER_TYPE='magento'
       export MONITOR_SCHEDULE='${settings.MONITOR_SCHEDULE}'
       export ALERT_EMAIL='${settings.BACKUP_EMAIL}'
-      export REPO_BASE_URL='https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/ai-monitor'
-      curl -fsSL "$REPO_BASE_URL/install_monitor.sh" -o /tmp/install_monitor.sh
-      chmod +x /tmp/install_monitor.sh
+      export N8N_DOMAIN='n8n.${env.domain}'
+      export N8N_PORT='${settings.N8N_PORT}'
+      export N8N_ALLOWED_IPS='${settings.N8N_ALLOWED_IPS}'
+      export REPO_BASE_URL='https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/n8n'
+      curl -fsSL "$REPO_BASE_URL/install_n8n.sh" -o /tmp/install_n8n.sh
+      chmod +x /tmp/install_n8n.sh
       # Tee output to /var/log/run.log AND stdout so Jelastic surfaces failures
       # in the build dialog. Fatal on failure so problems are visible immediately.
       set -o pipefail
-      bash /tmp/install_monitor.sh 2>&1 | tee -a /var/log/run.log
+      bash /tmp/install_n8n.sh 2>&1 | tee -a /var/log/run.log
     user: root
     sayYes: true
   setupCPNonRoot:
@@ -400,10 +417,12 @@ success:
     * **LAPI URL**: http://127.0.0.1:8080
     * Configure in Magento Admin: Stores > Configuration > Security > CrowdSec Bouncer
 
-    ## AI Server Monitor
+    ## n8n (self-hosted workflow automation)
 
-    * **Schedule**: ${settings.MONITOR_SCHEDULE} (cron on AppServer)
-    * **Config**: /etc/server-monitor/config.yaml
-    * **Log**: /var/log/server-monitor.log (one JSON entry per run)
-    * **Health check**: `/opt/server-monitor/venv/bin/python /opt/server-monitor/monitor_agent.py --health-check`
-    * If the Gemini API key was left blank during install, set `gemini_api_key:` in the config file - the agent runs in disabled mode until you do.
+    * **URL**: http://n8n.${env.domain}:${settings.N8N_PORT}/
+    * **First login**: open the URL from an allowlisted IP and create the owner account
+    * **IP allowlist**: ${settings.N8N_ALLOWED_IPS} (edit `/etc/nginx/conf.d/n8n.conf` to change)
+    * **Env file**: /etc/n8n/n8n.env (contains `GEMINI_API_KEY` and `N8N_MONITOR_SCHEDULE`; `systemctl restart n8n` after edits)
+    * **Data dir / SQLite**: /var/lib/n8n/database.sqlite
+    * **Log**: /var/log/n8n.log
+    * **Default workflow**: `Server Monitor` (security/health/Magento snapshot -> Gemini -> alert email). Imported automatically when present; otherwise import via UI from `/var/lib/n8n/workflows-pending/server-monitor.json`. Schedule: ${settings.MONITOR_SCHEDULE}.
