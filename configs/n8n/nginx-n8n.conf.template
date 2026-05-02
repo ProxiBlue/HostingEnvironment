@@ -5,7 +5,12 @@
 server {
     listen __N8N_PORT__;
     listen [::]:__N8N_PORT__;
-    server_name __N8N_DOMAIN__;
+    # Catch-all server_name: this is the only vhost on __N8N_PORT__, so routing
+    # is by port, not Host header. Using '_' instead of the n8n subdomain hides
+    # it from the Jelastic LE addon's vhost scan, which would otherwise try to
+    # issue a cert for n8n.<env.domain> and fail (no DNS for the subdomain).
+    # When you put SSL on n8n later, set this to the real subdomain.
+    server_name _;
 
     # Serve nothing for non-allowlisted source IPs.
 __ALLOW_BLOCK__

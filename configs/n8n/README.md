@@ -80,11 +80,18 @@ and `nginx -s reload` to change it. Pattern is plain nginx
 
 ## SSL
 
-The initial install serves HTTP. To put TLS on `n8n.<domain>`, add the
-subdomain to the Jelastic Let's Encrypt addon's `customDomains` list and
-re-run the addon. After the cert is issued, edit `n8n.conf` to listen on
-`<port> ssl` and reference the cert paths Let's Encrypt drops, then flip
-`N8N_PROTOCOL`/`WEBHOOK_URL`/`N8N_EDITOR_BASE_URL` in `n8n.env` to `https`.
+The initial install serves HTTP. The vhost ships with `server_name _;`
+(catch-all) so the LE addon's vhost scan doesn't trip on a subdomain
+without DNS. To put TLS on `n8n.<domain>`:
+
+1. Create a DNS A record for `n8n.<domain>` pointing at the env IP.
+2. Add `n8n.<domain>` to the Jelastic Let's Encrypt addon's `customDomains`
+   list and re-run the addon.
+3. Edit `/etc/nginx/conf.d/n8n.conf`: change `server_name _;` to
+   `server_name n8n.<domain>;`, change `listen <port>;` to
+   `listen <port> ssl;`, and add the cert paths LE drops.
+4. Flip `N8N_PROTOCOL`/`WEBHOOK_URL`/`N8N_EDITOR_BASE_URL` in `n8n.env`
+   to `https`, then `systemctl restart n8n nginx`.
 
 ## How the `Server Monitor` workflow works
 
