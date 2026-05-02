@@ -243,7 +243,7 @@ actions:
   - log: Setup Yum packages
   - cmd [cp]: |-
       yum update
-      curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - &>> /var/log/run.log
+      curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - &>> /var/log/run.log
       yum install -y nodejs &>> /var/log/run.log
       yum install epel-release &>> /var/log/run.log
       yum update

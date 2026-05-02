@@ -46,15 +46,23 @@ require_root() {
 }
 
 require_node() {
-  if ! command -v node >/dev/null 2>&1; then
-    echo "node is required (>=18.17). The Jelastic InstallCPYumPackages step installs Node.js 20; if you are running this stand-alone, install Node.js first." >&2
-    exit 1
+  # Current n8n requires Node >=22.16 (its bundled isolated-vm needs
+  # v8::SourceLocation which doesn't exist in Node 20's V8 headers).
+  # The Jelastic InstallCPYumPackages step installs Node 22 from NodeSource;
+  # auto-install if missing for stand-alone runs.
+  local major=0
+  if command -v node >/dev/null 2>&1; then
+    major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
   fi
-  local major
-  major="$(node -p 'process.versions.node.split(".")[0]')"
-  if [ "${major:-0}" -lt 18 ]; then
-    echo "node $major detected; n8n requires >=18.17" >&2
-    exit 1
+  if [ "${major:-0}" -lt 22 ]; then
+    log "node ${major:-missing} detected; installing Node.js 22.x from NodeSource"
+    curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+    yum install -y nodejs
+    major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+    if [ "${major:-0}" -lt 22 ]; then
+      echo "node upgrade failed; still on $major. Install Node.js >=22.16 manually and re-run." >&2
+      exit 1
+    fi
   fi
 }
 
