@@ -203,8 +203,29 @@ path.write_text(text.replace('__ALLOW_BLOCK__', block))
 PY
   rm -f "${NGINX_VHOST}.tpl"
 
+  # SELinux on AlmaLinux 9 only labels a fixed list of ports as http_port_t
+  # (80, 443, 8008, 8443, ...). Binding nginx to N8N_PORT outside that list
+  # is denied at restart time. Reload doesn't re-bind so the failure surfaces
+  # later in unrelated steps (LE addon's nginx restart, etc.) - label the
+  # port up front to make the bind succeed.
+  if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" = "Enforcing" ]; then
+    if ! command -v semanage >/dev/null 2>&1; then
+      yum install -y policycoreutils-python-utils >/dev/null 2>&1 || true
+    fi
+    if command -v semanage >/dev/null 2>&1; then
+      log "labeling tcp/$N8N_PORT as http_port_t for SELinux"
+      semanage port -a -t http_port_t -p tcp "$N8N_PORT" 2>/dev/null \
+        || semanage port -m -t http_port_t -p tcp "$N8N_PORT" 2>/dev/null \
+        || log "WARNING: semanage port -a/-m failed for $N8N_PORT; nginx may fail to bind"
+    else
+      log "WARNING: semanage unavailable; if SELinux is enforcing, nginx may fail to bind tcp/$N8N_PORT"
+    fi
+  fi
+
   if nginx -t >/dev/null 2>&1; then
-    systemctl reload nginx 2>/dev/null || systemctl restart nginx
+    # Use restart (not reload) so port-bind failures surface here, not
+    # three steps later in the LE addon.
+    systemctl restart nginx
   else
     echo "[install_n8n] ERROR: nginx config invalid after writing $NGINX_VHOST" >&2
     nginx -t || true
