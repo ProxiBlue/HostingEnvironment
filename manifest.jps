@@ -121,7 +121,6 @@ onInstall:
   - secureDb
   - hardenDb
   - SetupAccess
-  - removeDefaultSSHKeys
   - InstallCPYumPackages
   - setupCPConfigs
   - setupCPPackages
@@ -143,19 +142,6 @@ actions:
   - cmd [cp]: |-
       echo ${globals.NGINX_PASS}| passwd --stdin nginx &>> /var/log/run.log
       echo ${globals.NGINX_PASS}| passwd --stdin root &>> /var/log/run.log
-    user: root
-    sayYes: true
-  removeDefaultSSHKeys:
-  - log: Remove Jelastic default shared SSH keys from all nodes
-  - cmd [cp, sqldb, nosqldb, es]: |-
-      for user_home in /root /var/lib/nginx /home/*; do
-        auth_file="${user_home}/.ssh/authorized_keys"
-        if [ -f "${auth_file}" ]; then
-          grep -v "jelastic" "${auth_file}" > "${auth_file}.tmp" || true
-          mv "${auth_file}.tmp" "${auth_file}"
-          chmod 600 "${auth_file}"
-        fi
-      done
     user: root
     sayYes: true
   createDb:
