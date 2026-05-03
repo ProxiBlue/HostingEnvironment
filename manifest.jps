@@ -121,7 +121,6 @@ onInstall:
   - secureDb
   - hardenDb
   - SetupAccess
-  - lockdownSSH
   - removeDefaultSSHKeys
   - InstallCPYumPackages
   - setupCPConfigs
@@ -157,18 +156,6 @@ actions:
           chmod 600 "${auth_file}"
         fi
       done
-    user: root
-    sayYes: true
-  lockdownSSH:
-  - log: Block all external SSH - use Jelastic web SSH portal only
-  - cmd [cp, sqldb, nosqldb, es]: |-
-      echo '*filter' > /etc/sysconfig/iptables-custom
-      echo '-A INPUT -s 10.0.0.0/8 -p tcp -m tcp --dport 22 -j ACCEPT' >> /etc/sysconfig/iptables-custom
-      echo '-A INPUT -s 172.16.0.0/12 -p tcp -m tcp --dport 22 -j ACCEPT' >> /etc/sysconfig/iptables-custom
-      echo '-A INPUT -s 192.168.0.0/16 -p tcp -m tcp --dport 22 -j ACCEPT' >> /etc/sysconfig/iptables-custom
-      echo '-A INPUT -p tcp -m tcp --dport 22 -j DROP' >> /etc/sysconfig/iptables-custom
-      echo 'COMMIT' >> /etc/sysconfig/iptables-custom
-      /usr/bin/jem firewall fwstart 2>/dev/null || iptables-restore --noflush < /etc/sysconfig/iptables-custom
     user: root
     sayYes: true
   createDb:
