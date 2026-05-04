@@ -321,7 +321,7 @@ actions:
       export MONITOR_SCHEDULE='${settings.MONITOR_SCHEDULE}'
       export ALERT_EMAIL='${settings.BACKUP_EMAIL}'
       export N8N_DOMAIN='n8n.${env.domain}'
-      export N8N_PORT='${settings.N8N_PORT}'
+      export N8N_PUBLIC_PORT='${settings.N8N_PORT}'
       export N8N_ALLOWED_IPS='${settings.N8N_ALLOWED_IPS}'
       export REPO_BASE_URL='https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/n8n'
       curl -fsSL "$REPO_BASE_URL/install_n8n.sh" -o /tmp/install_n8n.sh

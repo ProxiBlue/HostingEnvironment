@@ -9,6 +9,10 @@ Type=simple
 User=n8n
 Group=n8n
 EnvironmentFile=/etc/n8n/n8n.env
+# Hard-pin the bind port. Environment= takes precedence over EnvironmentFile=
+# and any inherited env, so n8n cannot grab the public port nginx needs.
+Environment="N8N_PORT=5678"
+Environment="N8N_LISTEN_ADDRESS=127.0.0.1"
 WorkingDirectory=/var/lib/n8n
 ExecStart=/usr/bin/n8n start
 Restart=on-failure
