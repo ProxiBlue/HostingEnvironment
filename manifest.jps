@@ -57,12 +57,12 @@ settings:
   - caption: "n8n UI Port"
     type: list
     values:
-        "5679": "5679 (default)"
-        "8443": "8443"
+        "8443": "8443 (default)"
         "8080": "8080"
+        "5679": "5679 (avoid - collides with n8n task-runner default)"
     required: true
     name: N8N_PORT
-    value: "5679"
+    value: "8443"
 
 skipNodeEmails: true
 

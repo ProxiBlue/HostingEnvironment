@@ -13,6 +13,11 @@ EnvironmentFile=/etc/n8n/n8n.env
 # and any inherited env, so n8n cannot grab the public port nginx needs.
 Environment="N8N_PORT=5678"
 Environment="N8N_LISTEN_ADDRESS=127.0.0.1"
+# Pin the task-runner broker port out of the public-port range. n8n defaults
+# the broker to N8N_PORT+1 (= 5679), which collides with nginx if the user
+# picks 5679 as the public port.
+Environment="N8N_RUNNERS_BROKER_PORT=5680"
+Environment="N8N_RUNNERS_TASK_BROKER_LISTEN_ADDRESS=127.0.0.1"
 WorkingDirectory=/var/lib/n8n
 ExecStart=/usr/bin/n8n start
 Restart=on-failure

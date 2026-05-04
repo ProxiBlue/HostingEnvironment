@@ -246,12 +246,13 @@ start_service() {
 }
 
 verify_bind_port() {
-  # n8n must bind 127.0.0.1:$N8N_INTERNAL_PORT and nothing else listening
-  # ports we care about. If it's grabbed the public port, nginx will be in a
-  # bind-failure restart loop - fail the install loudly so it's noticed now.
+  # Catch port-collision regressions at install time, not later in production:
+  # n8n main must be on 127.0.0.1:$N8N_INTERNAL_PORT, and nothing n8n-related
+  # may be on $N8N_PUBLIC_PORT (which belongs to nginx). The task-runner
+  # broker is the usual culprit if the latter check trips.
   local tries=0
   while [ "$tries" -lt 15 ]; do
-    if ss -tlnp 2>/dev/null | grep -q "127.0.0.1:$N8N_INTERNAL_PORT.*n8n\|127.0.0.1:$N8N_INTERNAL_PORT.*node"; then
+    if ss -tlnp 2>/dev/null | grep -qE "127\.0\.0\.1:$N8N_INTERNAL_PORT[[:space:]].*node"; then
       log "n8n bound 127.0.0.1:$N8N_INTERNAL_PORT as expected"
       break
     fi
@@ -259,9 +260,9 @@ verify_bind_port() {
     sleep 1
   done
 
-  if ss -tlnp 2>/dev/null | grep -qE ":$N8N_PUBLIC_PORT[[:space:]].*node"; then
-    echo "[install_n8n] FATAL: n8n is listening on the public port $N8N_PUBLIC_PORT instead of $N8N_INTERNAL_PORT" >&2
-    echo "[install_n8n] something in n8n's runtime env is overriding N8N_PORT. Current ss output:" >&2
+  if ss -tlnp 2>/dev/null | grep -qE "127\.0\.0\.1:$N8N_PUBLIC_PORT[[:space:]].*node|0\.0\.0\.0:$N8N_PUBLIC_PORT[[:space:]].*node"; then
+    echo "[install_n8n] FATAL: an n8n process is listening on the public port $N8N_PUBLIC_PORT - nginx will be unable to bind it." >&2
+    echo "[install_n8n] current relevant listeners:" >&2
     ss -tlnp 2>&1 | grep -E "node|nginx" >&2 || true
     return 1
   fi
