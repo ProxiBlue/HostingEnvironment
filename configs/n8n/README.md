@@ -91,7 +91,9 @@ without DNS. To put TLS on `n8n.<domain>`:
    `server_name n8n.<domain>;`, change `listen <port>;` to
    `listen <port> ssl;`, and add the cert paths LE drops.
 4. Flip `N8N_PROTOCOL`/`WEBHOOK_URL`/`N8N_EDITOR_BASE_URL` in `n8n.env`
-   to `https`, then `systemctl restart n8n nginx`.
+   to `https`, remove the `N8N_SECURE_COOKIE=false` line (or set it to
+   `true`) so the auth cookie gets the `Secure` flag again, then
+   `systemctl restart n8n nginx`.
 
 ## How the `Server Monitor` workflow works
 

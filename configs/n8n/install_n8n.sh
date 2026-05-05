@@ -120,6 +120,12 @@ N8N_EDITOR_BASE_URL=$protocol://$N8N_DOMAIN:$N8N_PUBLIC_PORT/
 # Trust X-Forwarded-* from the local nginx hop.
 N8N_PROXY_HOPS=1
 
+# n8n defaults secure-cookie to true (cookie has the Secure flag), which
+# blocks login over plain HTTP. The install ships HTTP-only; access is
+# already gated by the nginx IP allowlist. Flip this back to true (or
+# delete the line) once you put TLS on the n8n vhost (see README SSL).
+N8N_SECURE_COOKIE=false
+
 # SQLite (default backend). Made explicit for clarity.
 DB_TYPE=sqlite
 DB_SQLITE_DATABASE=$DATA_DIR/database.sqlite
