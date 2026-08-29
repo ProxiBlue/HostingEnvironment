@@ -19,6 +19,11 @@ server {
     ssl_prefer_server_ciphers   on;
     ssl_session_cache shared:SSL:10m;
 
+    # #401: refuse any non-Cloudflare source at the origin before Magento is touched.
+    # Placed in conf.d/includes/ (NOT conf.d/) so nginx.conf's http-context glob
+    # doesn't try to parse `if` at http level.
+    include /etc/nginx/conf.d/includes/cloudflare-allowlist.conf;
+
     include /etc/nginx/aliases.conf;
     include /etc/nginx/conf.d/SITES_ENABLED/*.conf;
 }
