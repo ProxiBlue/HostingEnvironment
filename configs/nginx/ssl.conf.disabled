@@ -19,6 +19,9 @@ server {
     ssl_prefer_server_ciphers   on;
     ssl_session_cache shared:SSL:10m;
 
+    # #401: refuse any non-Cloudflare source at the origin before Magento is touched.
+    include /etc/nginx/conf.d/cloudflare-allowlist.conf;
+
     include /etc/nginx/aliases.conf;
     include /etc/nginx/conf.d/SITES_ENABLED/*.conf;
 }

@@ -237,6 +237,12 @@ actions:
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nginx.conf > /etc/nginx/nginx.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nossl.conf > /etc/nginx/conf.d/nossl.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/ssl.conf.disabled > /etc/nginx/conf.d/ssl.conf.disabled
+      # #400 + #401: Cloudflare origin lockdown (real IP restore + CF-only allowlist + weekly refresh cron)
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/cloudflare-realip.conf > /etc/nginx/conf.d/cloudflare-realip.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/cloudflare-allowlist.conf > /etc/nginx/conf.d/cloudflare-allowlist.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/refresh-cf-ips.sh > /usr/local/bin/refresh-cf-ips.sh
+      chmod 0755 /usr/local/bin/refresh-cf-ips.sh
+      echo "0 3 * * 0 root /usr/local/bin/refresh-cf-ips.sh" > /etc/cron.d/cloudflare-ips-refresh
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/php-fpm.conf > /etc/php-fpm.conf
       mkdir -p /etc/nginx/conf.d/SITES_ENABLED
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/site-default-mg2.conf > /etc/nginx/conf.d/SITES_ENABLED/site-default.conf
@@ -266,6 +272,10 @@ actions:
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-badurls.conf > /etc/fail2ban/jail.d/nginx-badurls.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-search.conf > /etc/fail2ban/filter.d/nginx-search.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-search.conf > /etc/fail2ban/jail.d/nginx-search.conf
+      # #400: catalogsearch filter-param scrape — one-strike jail; disable nginx-search (too loose)
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-catalogsearch-params.conf > /etc/fail2ban/filter.d/nginx-catalogsearch-params.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-catalogsearch-params.conf > /etc/fail2ban/jail.d/nginx-catalogsearch-params.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/disable-nginx-search.local > /etc/fail2ban/jail.d/disable-nginx-search.local
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-magento-admin.conf > /etc/fail2ban/filter.d/nginx-magento-admin.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-magento-admin.conf > /etc/fail2ban/jail.d/nginx-magento-admin.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/fail2banUpdate.sh > /root/fail2banUpdate.sh

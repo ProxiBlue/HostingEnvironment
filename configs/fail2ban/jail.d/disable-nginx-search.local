@@ -1,0 +1,4 @@
+# Disable the too-loose nginx-search jail (matches any GET /search/ endpoint).
+# Replaced by targeted nginx-catalogsearch-params jail (filter-param scrape fingerprint).
+[nginx-search]
+enabled = false
