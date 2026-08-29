@@ -237,9 +237,17 @@ actions:
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nginx.conf > /etc/nginx/nginx.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nossl.conf > /etc/nginx/conf.d/nossl.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/ssl.conf.disabled > /etc/nginx/conf.d/ssl.conf.disabled
-      # #400 + #401: Cloudflare origin lockdown (real IP restore + CF-only allowlist + weekly refresh cron)
+      # #400 + #401: Cloudflare origin lockdown.
+      # cloudflare-realip.conf   → real client IP restoration (http-context, in conf.d/)
+      # cloudflare-geo.conf      → geo $realip_remote_addr $cf_allowed { ... } (http-context, in conf.d/)
+      # includes/cloudflare-allowlist.conf → `if ($cf_allowed = 0) { return 403; }`
+      #                            (server-context; MUST live in conf.d/includes/ subdir
+      #                            because nginx.conf globs conf.d/*.conf at http-context
+      #                            where `if` is invalid — learned the hard way on LCD 2026-08-29)
+      mkdir -p /etc/nginx/conf.d/includes
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/cloudflare-realip.conf > /etc/nginx/conf.d/cloudflare-realip.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/cloudflare-allowlist.conf > /etc/nginx/conf.d/cloudflare-allowlist.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/cloudflare-geo.conf > /etc/nginx/conf.d/cloudflare-geo.conf
+      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/includes/cloudflare-allowlist.conf > /etc/nginx/conf.d/includes/cloudflare-allowlist.conf
       curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/refresh-cf-ips.sh > /usr/local/bin/refresh-cf-ips.sh
       chmod 0755 /usr/local/bin/refresh-cf-ips.sh
       echo "0 3 * * 0 root /usr/local/bin/refresh-cf-ips.sh" > /etc/cron.d/cloudflare-ips-refresh
