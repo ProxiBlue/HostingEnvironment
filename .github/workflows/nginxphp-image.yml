@@ -91,7 +91,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: docker/nginxphp
-          push: true
+          # Plain Docker v2 manifest, like Jelastic's own images: the platform
+          # cannot read OCI indexes carrying buildx attestation manifests.
+          provenance: false
+          sbom: false
+          outputs: type=registry,oci-mediatypes=false
           build-args: |
             BASE_TAG=${{ steps.v.outputs.base }}
             PHP_VERSION=${{ steps.v.outputs.php }}
