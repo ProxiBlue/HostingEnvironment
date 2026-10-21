@@ -335,11 +335,17 @@ actions:
   setupCPNonRoot:
   - log: Setup Non Root Parts
   - cmd [cp]: |-
-      mkdir /var/www/webroot/site_report/
+      # Runs as root: by this point the nginx user can no longer write
+      # /var/spool/cron (seen on the 1.30.6-php-8.4.27 image). The crontab is
+      # handed back to nginx with the ownership/mode cronie expects.
+      mkdir -p /var/www/webroot/site_report/
+      chown nginx:nginx /var/www/webroot/site_report/
       echo "0 5 * * * /bin/bash /var/www/webroot/ROOT/backup/backup_to_s3.sh media 2>&1 >/var/www/webroot/ROOT/var/log/backups.log" >> /var/spool/cron/nginx
       echo "5 8 * * 0 rm -rf /var/www/webroot/ROOT/pub/media/import/* 2>&1 >/dev/null" >> /var/spool/cron/nginx
       echo "0 1 * * * zcat /var/log/nginx/access*.gz | grep -v -f /var/www/webroot/ROOT/go_access_exclude_list.txt | goaccess -o /var/www/webroot/site_report/index.html --log-format=COMBINED - 2>&1 >/dev/null" >> /var/spool/cron/nginx
-    user: nginx
+      chown nginx:nginx /var/spool/cron/nginx
+      chmod 0600 /var/spool/cron/nginx
+    user: root
   installSSL:
   - log: Install Let's Encrypt SSL addon
   - install:
