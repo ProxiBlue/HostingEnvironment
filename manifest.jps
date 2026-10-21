@@ -134,7 +134,6 @@ onInstall:
       - cp
       - es
       - nosqldb
-  - installSSL
 
 actions:
   SetupAccess:
@@ -346,16 +345,6 @@ actions:
       chown nginx:nginx /var/spool/cron/nginx
       chmod 0600 /var/spool/cron/nginx
     user: root
-  installSSL:
-  - log: Install Let's Encrypt SSL addon
-  - install:
-      jps: https://raw.githubusercontent.com/jelastic-jps/lets-encrypt/master/manifest.jps?_r=${fn.random}
-      nodeGroup: cp
-      settings:
-        customDomains: ""
-        fallbackToX1: "true"
-        webroot: "true"
-        webrootPath: /var/www/webroot/ROOT/pub
 success:
   text: |
     ## Database: ${nodes.mariadb-dockerized.name}

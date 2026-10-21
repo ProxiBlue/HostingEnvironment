@@ -155,7 +155,14 @@ All filters auto-update daily from the repo via `fail2banUpdate.sh`.
 
 ### SSL
 
-Let's Encrypt SSL addon is installed automatically at provisioning with webroot validation.
+Not installed by the manifest. After provisioning, install the Let's Encrypt
+Free SSL add-on from the Jelastic Marketplace on the AppServer (`cp`) layer:
+
+- Custom domains: the bound domain(s), or blank for the environment domain
+- Webroot: on, path `/var/www/webroot/ROOT/pub`
+- Fallback to X1: on
+
+`nossl.conf` already serves `/.well-known/acme-challenge/` for webroot validation.
 
 ## Log Rotation
 
@@ -339,7 +346,7 @@ bin/magento cache:flush
 
 1. Stop and start the entire environment (ensures all services start correctly with supervisord)
 2. Bind your domain
-3. Verify SSL certificate issued correctly via the Let's Encrypt addon
+3. Install the Let's Encrypt add-on (see [SSL](#ssl)) and verify the certificate issued
 
 ## Cron Schedule Summary
 
