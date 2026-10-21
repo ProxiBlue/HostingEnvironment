@@ -18,7 +18,7 @@ The AppServer also runs a local Redis instance for Magento cache (separate from 
 | Field | Description |
 |-------|-------------|
 | Backup Email | Used for fail2ban alerts and backup failure notifications |
-| PHP Version | Currently 8.4.27 on AlmaLinux 9 (see [PHP image](#php-image)) |
+| PHP Version | Currently 8.4.27 on AlmaLinux 9 (see [PHP Image](#php-image)) |
 | OpenSearch Version | 2.19.5 (recommended for Magento 2.4.8) or 3.6.0 (for 2.4.9+) |
 
 ## PHP Image
@@ -37,8 +37,14 @@ therefore runs `ghcr.io/proxiblue/nginxphp`, built by
   moves `ghcr.io/proxiblue/nginxphp:8.4-almalinux-9`. Once Jelastic ships
   the patch itself, its image is mirrored unchanged.
 
-To move new environments to a new patch, update the `PHP_VERSION` tag in
-`manifest.jps`.
+The manifest normally uses Jelastic's own image (`nodeType:
+nginxphp-dockerized`, tag in `PHP_VERSION`). When a security patch is out
+and Jelastic has not published it, the ghcr image is the stopgap. It is not
+yet proven on a real Jelastic install: a node declared as a bare `image:`
+with the full ghcr reference as the setting value failed with "JPS manifest
+is corrupted! Unexpected token: h". Untried alternative: the OpenSearch
+node's shape (`nodeType: docker`, `image: ghcr.io/proxiblue/nginxphp:<tag>`).
+Test-deploy before relying on it.
 
 ## Self-Healing & Monitoring
 

@@ -21,10 +21,10 @@ settings:
   - caption: "PHP Version"
     type: list
     values:
-        1.30.5-php-8.4.27-almalinux-9 : 8.4.27
+        1.30.6-php-8.4.27-almalinux-9 : 8.4.27
     required: true
     name: PHP_VERSION
-    value: 1.30.5-php-8.4.27-almalinux-9
+    value: 1.30.6-php-8.4.27-almalinux-9
   - caption: "OpenSearch Version"
     type: list
     values:
@@ -67,10 +67,8 @@ settings:
 skipNodeEmails: true
 
 nodes:
-# Jelastic nginxphp image with PHP rebuilt to the current php.net patch
-# release; built by .github/workflows/nginxphp-image.yml (docker/nginxphp/).
-- nodeType: docker
-  image: ghcr.io/proxiblue/nginxphp:${settings.PHP_VERSION}
+- nodeType: nginxphp-dockerized
+  tag: ${settings.PHP_VERSION}
   count: 1
   cloudlets: 74
   extip: 1
