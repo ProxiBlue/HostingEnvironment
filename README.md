@@ -18,8 +18,27 @@ The AppServer also runs a local Redis instance for Magento cache (separate from 
 | Field | Description |
 |-------|-------------|
 | Backup Email | Used for fail2ban alerts and backup failure notifications |
-| PHP Version | Currently 8.3.24 on AlmaLinux 9 |
+| PHP Version | Currently 8.4.27 on AlmaLinux 9 (see [PHP image](#php-image)) |
 | OpenSearch Version | 2.19.5 (recommended for Magento 2.4.8) or 3.6.0 (for 2.4.9+) |
+
+## PHP Image
+
+Jelastic publishes new PHP patch images weeks after php.net. The AppServer
+therefore runs `ghcr.io/proxiblue/nginxphp`, built by
+`.github/workflows/nginxphp-image.yml` from `docker/nginxphp/`:
+
+- Starts from the newest `jelastic/nginxphp` image for the PHP minor line
+  (8.4) and rebuilds PHP from the php.net source release (sha256-verified),
+  using Jelastic's own layout and configure options.
+- Bundled extensions are rebuilt; PECL extensions (redis, imagick, apcu, ...)
+  are kept from the base image, as the extension ABI is fixed within a minor line.
+- Runs every 6 hours. A new php.net patch or a new Jelastic base image
+  publishes `ghcr.io/proxiblue/nginxphp:<nginx>-php-<php>-almalinux-9` and
+  moves `ghcr.io/proxiblue/nginxphp:8.4-almalinux-9`. Once Jelastic ships
+  the patch itself, its image is mirrored unchanged.
+
+To move new environments to a new patch, update the `PHP_VERSION` tag in
+`manifest.jps`.
 
 ## Self-Healing & Monitoring
 
