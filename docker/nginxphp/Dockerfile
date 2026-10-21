@@ -23,14 +23,22 @@ ARG PHP_SHA256=
 
 # Builder links against the libraries already in the runtime image; the
 # version-locked -devel packages below refuse to upgrade them.
-RUN dnf -y install --setopt=install_weak_deps=0 --enablerepo=crb,epel,pgdg14 dnf-plugins-core \
-    && dnf -y install --setopt=install_weak_deps=0 --enablerepo=crb,epel,pgdg14 \
+# EPEL is pinned to the Fedora primary: metalink mirrors with broken TLS have
+# failed CI builds. Retried for transient mirror errors.
+RUN dnf config-manager --save \
+        --setopt=epel.metalink= \
+        --setopt='epel.baseurl=https://dl.fedoraproject.org/pub/epel/9/Everything/$basearch/' \
+    && for attempt in 1 2 3; do \
+        dnf -y install --setopt=install_weak_deps=0 --enablerepo=crb,epel,pgdg14 \
         bzip2-devel enchant-devel freetds-devel freetype-devel gettext-devel gmp-devel \
         libargon2-devel libcurl-devel libedit-devel libffi-devel libicu-devel-$(rpm -q --qf '%{VERSION}-%{RELEASE}' libicu) \
         libfbclient2-devel libjpeg-turbo-devel libpng-devel libsodium-devel libtidy-devel \
         libwebp-devel libXpm-devel libxml2-devel libxslt-devel libzip-devel net-snmp-devel \
         oniguruma-devel openldap-devel openssl-devel postgresql14-devel sqlite-devel \
         unixODBC-devel pkgconf-pkg-config gcc gcc-c++ make bison re2c xz \
+        && break; \
+        [ "$attempt" = 3 ] && exit 1; dnf clean metadata; sleep 15; \
+    done \
     && dnf clean all
 
 WORKDIR /usr/src
