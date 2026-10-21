@@ -1,0 +1,114 @@
+name: nginxphp image
+
+# Publishes ghcr.io/proxiblue/nginxphp:<nginx>-php-<php>-almalinux-9 - the newest
+# Jelastic nginxphp image for the PHP minor line, with PHP rebuilt to the newest
+# php.net patch release when Jelastic has not published it yet.
+# See docker/nginxphp/Dockerfile.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/nginxphp/**
+      - .github/workflows/nginxphp-image.yml
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even if the tag already exists
+        type: boolean
+        default: false
+
+env:
+  PHP_MINOR: '8.4'
+  IMAGE: ghcr.io/proxiblue/nginxphp
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: nginxphp-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve versions
+        id: v
+        run: |
+          set -euo pipefail
+          release=$(curl -fsSL "https://www.php.net/releases/index.php?json&version=${PHP_MINOR}")
+          php=$(jq -r .version <<<"$release")
+          sha=$(jq -r '.source[] | select(.filename | endswith(".tar.xz")) | .sha256' <<<"$release")
+
+          base=$(curl -fsSL "https://hub.docker.com/v2/repositories/jelastic/nginxphp/tags?page_size=100&name=-php-${PHP_MINOR}." \
+            | jq -r '.results[].name' | grep -E "^[0-9.]+-php-${PHP_MINOR//./\\.}\.[0-9]+-almalinux-9$" \
+            | sort -t- -k1,1V -k3,3V | tail -1)
+          [ -n "$base" ] || { echo "no jelastic base tag found" >&2; exit 1; }
+          nginx=${base%%-php-*}
+          base_php=${base#*-php-}; base_php=${base_php%-almalinux-9}
+
+          tag="${nginx}-php-${php}-almalinux-9"
+          echo "php=$php base=$base base_php=$base_php tag=$tag"
+          {
+            echo "php=$php"; echo "sha=$sha"; echo "base=$base"; echo "base_php=$base_php"; echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check existing tag
+        id: exists
+        run: |
+          if [ "${{ inputs.force }}" != "true" ] && [ "${{ github.event_name }}" != "push" ] \
+             && docker manifest inspect "$IMAGE:${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "$IMAGE:${{ steps.v.outputs.tag }} already published"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Jelastic already ships this PHP patch: publish their image unchanged under our name.
+      - name: Mirror base image
+        if: steps.exists.outputs.skip == 'false' && steps.v.outputs.base_php == steps.v.outputs.php
+        run: |
+          docker buildx imagetools create \
+            -t "$IMAGE:${{ steps.v.outputs.tag }}" -t "$IMAGE:${PHP_MINOR}-almalinux-9" \
+            "docker.io/jelastic/nginxphp:${{ steps.v.outputs.base }}"
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.exists.outputs.skip == 'false' && steps.v.outputs.base_php != steps.v.outputs.php
+
+      - name: Build and push
+        if: steps.exists.outputs.skip == 'false' && steps.v.outputs.base_php != steps.v.outputs.php
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/nginxphp
+          push: true
+          build-args: |
+            BASE_TAG=${{ steps.v.outputs.base }}
+            PHP_VERSION=${{ steps.v.outputs.php }}
+            PHP_SHA256=${{ steps.v.outputs.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.v.outputs.tag }}
+            ${{ env.IMAGE }}:${{ env.PHP_MINOR }}-almalinux-9
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test published image
+        if: steps.exists.outputs.skip == 'false'
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE:${{ steps.v.outputs.tag }}" -c '
+            set -e
+            test "$(php -n -r "echo PHP_VERSION;")" = "${{ steps.v.outputs.php }}"
+            php-fpm -v | grep -q "PHP ${{ steps.v.outputs.php }} "
+            . /etc/sysconfig/php-fpm && php-fpm $OPTIONS -t
+            test -z "$(php -m 2>&1 >/dev/null)"
+            for e in redis imagick apcu; do php -d extension=$e.so -r "exit(extension_loaded(\"$e\") ? 0 : 1);"; done'
