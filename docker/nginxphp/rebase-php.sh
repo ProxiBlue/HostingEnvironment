@@ -62,7 +62,8 @@ missing=$(find "$NEW_DIR/bin" "$NEW_DIR/sbin" "$NEW_DIR/lib64/php/modules" -type
 [ -z "$missing" ] || { echo "unresolved libraries:" >&2; echo "$missing" >&2; exit 1; }
 
 # Every extension the stock php.ini loads must load cleanly under the new binary.
-startup=$(php -m 2>&1 >/dev/null || true)
+# CLI prints startup warnings on stdout, and the stock ini may route them to a log.
+startup=$(php -d display_startup_errors=1 -d log_errors=0 -m 2>&1 | grep -iE 'warning|error|deprecated' || true)
 [ -z "$startup" ] || { echo "php startup errors:" >&2; echo "$startup" >&2; exit 1; }
 
 echo "PHP $NEW_VERSION installed at $NEW_DIR"

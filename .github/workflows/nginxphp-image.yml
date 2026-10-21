@@ -110,5 +110,5 @@ jobs:
             test "$(php -n -r "echo PHP_VERSION;")" = "${{ steps.v.outputs.php }}"
             php-fpm -v | grep -q "PHP ${{ steps.v.outputs.php }} "
             . /etc/sysconfig/php-fpm && php-fpm $OPTIONS -t
-            test -z "$(php -m 2>&1 >/dev/null)"
+            ! php -d display_startup_errors=1 -d log_errors=0 -m 2>&1 | grep -iE "warning|error|deprecated"
             for e in redis imagick apcu; do php -d extension=$e.so -r "exit(extension_loaded(\"$e\") ? 0 : 1);"; done'
