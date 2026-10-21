@@ -349,7 +349,7 @@ actions:
   installSSL:
   - log: Install Let's Encrypt SSL addon
   - install:
-      jps: https://github.com/jelastic-jps/lets-encrypt/blob/stage/manifest.jps?_r=${fn.random}
+      jps: https://raw.githubusercontent.com/jelastic-jps/lets-encrypt/master/manifest.jps?_r=${fn.random}
       nodeGroup: cp
       settings:
         customDomains: ""
