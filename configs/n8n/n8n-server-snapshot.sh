@@ -53,9 +53,6 @@ runsh "tail -500 /var/log/secure 2>/dev/null | grep -iE 'fail|invalid|denied' | 
 section "NGINX 4XX/5XX (last hour, last 30)"
 runsh "awk -v d=\"\$(date -d '1 hour ago' '+%d/%b/%Y:%H')\" '\$0 ~ d && (\$9 ~ /^[45]/)' /var/log/nginx/access.log 2>/dev/null | tail -30"
 
-section "CROWDSEC ACTIVE DECISIONS"
-runsh "cscli decisions list -o human 2>/dev/null | head -20"
-
 section "FAIL2BAN STATUS"
 runsh "fail2ban-client status 2>/dev/null"
 

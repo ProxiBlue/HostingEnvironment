@@ -1,367 +1,201 @@
-# Standalone Magento 2 Hosting Environment for Jelastic
+# Magento 2 Hosting Environment for Jelastic / Virtuozzo Application Platform
 
-A self-healing JPS package that deploys a hardened, production-ready Magento 2 environment with automatic service recovery, security hardening, and monitoring across all nodes.
-
-## Architecture
-
-| Node | Software | Cloudlets | Disk |
-|------|----------|-----------|------|
-| **AppServer (cp)** | NGINX + PHP-FPM 8.3 | 74 | - |
-| **Database (sqldb)** | MariaDB 11.4 LTS | 28 | 200G |
-| **Sessions (nosqldb)** | Redis 7.2 | 28 | 10G |
-| **Search (es)** | OpenSearch 2.19.5 / 3.6.0 | 28 | 100G |
-
-The AppServer also runs a local Redis instance for Magento cache (separate from the session Redis node).
-
-## Install Settings
-
-| Field | Description |
-|-------|-------------|
-| Backup Email | Used for fail2ban alerts and backup failure notifications |
-| PHP Version | Currently 8.4.27 on AlmaLinux 9 (see [PHP Image](#php-image)) |
-| OpenSearch Version | 2.19.5 (recommended for Magento 2.4.8) or 3.6.0 (for 2.4.9+) |
-
-## PHP Image
-
-Jelastic publishes new PHP patch images weeks after php.net. The AppServer
-therefore runs `ghcr.io/proxiblue/nginxphp`, built by
-`.github/workflows/nginxphp-image.yml` from `docker/nginxphp/`:
-
-- Starts from the newest `jelastic/nginxphp` image for the PHP minor line
-  (8.4) and rebuilds PHP from the php.net source release (sha256-verified),
-  using Jelastic's own layout and configure options.
-- Bundled extensions are rebuilt; PECL extensions (redis, imagick, apcu, ...)
-  are kept from the base image, as the extension ABI is fixed within a minor line.
-- Runs every 6 hours. A new php.net patch or a new Jelastic base image
-  publishes `ghcr.io/proxiblue/nginxphp:<nginx>-php-<php>-almalinux-9` and
-  moves `ghcr.io/proxiblue/nginxphp:8.4-almalinux-9`. Once Jelastic ships
-  the patch itself, its image is mirrored unchanged.
-
-The manifest normally uses Jelastic's own image, pulled straight from Docker
-Hub (`nodeType: docker`, `image: jelastic/nginxphp:<PHP_VERSION>`).
-`nodeType: nginxphp-dockerized` with a `tag` is not used: when the hosting
-provider's stack catalog does not yet list the tag, Jelastic silently installs
-its default stack instead (8.5.11 when 1.30.6-php-8.4.27 was requested). The
-first install step, `checkPhpVersion`, aborts the install if the AppServer's
-PHP is not the version in `PHP_VERSION`. When a security patch is out
-and Jelastic has not published it, the ghcr image is the stopgap. It is not
-yet proven on a real Jelastic install: a node declared as a bare `image:`
-with the full ghcr reference as the setting value failed with "JPS manifest
-is corrupted! Unexpected token: h". Untried alternative: the OpenSearch
-node's shape (`nodeType: docker`, `image: ghcr.io/proxiblue/nginxphp:<tag>`).
-Test-deploy before relying on it.
-
-## Self-Healing & Monitoring
-
-Every node has health checks that automatically detect and recover from failures:
-
-### AppServer (cp) - Monit
-
-| Service | Check | Recovery |
-|---------|-------|----------|
-| NGINX | HTTP request to `/health_check.php` | Restart, circuit breaker after 5 failures |
-| PHP-FPM | Unix socket connectivity | Restart, circuit breaker after 5 failures |
-| Redis (local cache) | Port 6379 connectivity | Restart, alert on memory > 512MB |
-
-All three monitored via Monit with memory thresholds (NGINX > 1GB, PHP-FPM > 3GB triggers restart).
-
-### Database (sqldb) - Cron Health Check
-
-- `check_mariadb.sh` runs every 2 minutes
-- Uses `mysqladmin ping` to verify responsiveness
-- Restarts MariaDB after 3 consecutive failures
-- Logs to `/var/log/mysql/healthcheck.log`
-
-### Sessions (nosqldb) - Cron Health Check
-
-- `check_redis_sessions.sh` runs every 2 minutes
-- Uses `redis-cli ping` to verify responsiveness
-- Restarts Redis after 3 consecutive failures
-- Logs to `/var/log/redis_healthcheck.log`
-
-### Search (es) - Cron Health Check
-
-- `check_opensearch.sh` runs every 2 minutes
-- Checks HTTP response on `localhost:9200/_cluster/health`
-- Detects both unresponsive service AND red cluster status
-- Restarts via supervisorctl after 3 consecutive failures
-- Logs to `/var/log/opensearch/healthcheck.log`
-
-### Magento Cron Monitor
-
-- `check_magento_cron.sh` runs every 5 minutes on the AppServer
-- Queries `cron_schedule` table for recent successful executions
-- Alerts via email if no successful cron in last 15 minutes
-- Attempts to restart cron if process not found
-- Cleans up old `cron_schedule` entries (> 7 days) to prevent table bloat
-- Kills stuck jobs running for more than 1 hour
-
-## Security Hardening
-
-### SSH Lockdown
-
-All external SSH (port 22) is blocked on every node at provisioning time via iptables. Only Jelastic internal networks (RFC1918) are permitted, so SSH access is exclusively through the Jelastic web SSH portal.
-
-**Jelastic default SSH keys** are removed from all nodes at provisioning. The platform ships a shared key across all containers — this is replaced with project-specific keys only.
-
-### NGINX
-
-- **Rate limiting** on admin panel (30r/s), customer login (2r/s), and REST/GraphQL API (10r/s)
-- **Connection limiting** at 50 concurrent connections per IP
-- **Security headers**: `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options`
-- **PHP execution whitelisting** - only `index.php`, `get.php`, `static.php`, `health_check.php`, and error handlers can execute
-- **Banned locations** - `.php`, `.phtml`, `.htaccess`, `.htpasswd`, `.git`, `.user.ini` all denied
-- **php-fpm status/ping** restricted to localhost only
-- **Static assets** served with immutable cache headers (1 year)
-- Site config aligned with the official Magento 2.4 `nginx.conf.sample`
-
-### PHP Hardening
-
-- `expose_php = Off` - hides PHP version from headers
-- `allow_url_include = Off` - prevents remote file inclusion
-- `open_basedir` restricted to Magento root, `/tmp`, composer cache (`/var/lib/nginx/.composer`), and PHP binary path (`/usr/lib64/jelastic_php`)
-- `disable_functions` - `passthru` (note: `proc_open`/`popen` are required by Composer and `setup:di:compile`)
-- Secure session cookies: `httponly`, `secure`, `samesite=Lax`, `strict_mode`
-- `request_terminate_timeout = 600s` - kills runaway PHP processes
-- `request_slowlog_timeout = 30s` - logs slow requests to `/var/log/nginx/php-fpm.slow.log`
-
-### MariaDB Hardening
-
-- `skip-symbolic-links` - prevents symlink attacks
-- `local-infile = 0` - disables `LOAD DATA LOCAL`
-- phpMyAdmin access denied by default
-- Error logging to `/var/log/mysql/error.log`
-
-### OpenSearch Hardening
-
-- Demo config disabled (`DISABLE_INSTALL_DEMO_CONFIG=true`)
-- Security plugin disabled (internal network only, no public exposure)
-- JVM heap set via environment variable (`-Xms4g -Xmx4g`)
-
-### Firewall / Intrusion Prevention
-
-**fail2ban** with three filter sets:
-
-| Filter | Trigger | Ban |
-|--------|---------|-----|
-| `nginx-badurls` | Probing for phpMyAdmin, .env files, WordPress paths, etc. | 3 hits = ban |
-| `nginx-search` | Search abuse (catalog search flooding) | 10 hits in 15min = 10min ban |
-| `nginx-magento-admin` | Admin/customer login brute-force | 5 hits in 5min = 1 hour ban |
-
-All filters auto-update daily from the repo via `fail2banUpdate.sh`.
-
-**CrowdSec** with iptables firewall bouncer:
-
-- Parses nginx access/error logs and `/var/log/secure` in real-time
-- Blocks malicious IPs at the iptables level before requests reach nginx
-- Installed collections: `crowdsecurity/nginx`, `crowdsecurity/linux`, `crowdsecurity/base-http-scenarios`, `crowdsecurity/http-cve`
-- Shares threat intelligence with the CrowdSec community blocklist
-- Works alongside fail2ban — fail2ban handles Magento-specific patterns, CrowdSec handles broader threat detection and CVE-based attacks
-
-### SSL
-
-Not installed by the manifest. After provisioning, install the Let's Encrypt
-Free SSL add-on from the Jelastic Marketplace on the AppServer (`cp`) layer:
-
-- Custom domains: the bound domain(s), or blank for the environment domain
-- Webroot: on, path `/var/www/webroot/ROOT/pub`
-- Fallback to X1: on
-
-`nossl.conf` already serves `/.well-known/acme-challenge/` for webroot validation.
-
-## Log Rotation
-
-All nodes have logrotate configured to prevent disk exhaustion:
-
-| Node | Logs | Rotation |
-|------|------|----------|
-| AppServer | nginx access/error, php-fpm, slowlog | Daily, 14 days, compressed |
-| OpenSearch | opensearch.log | Daily, 7 days, compressed |
-| MariaDB | error.log | Weekly, 4 weeks, compressed |
-
-## Services & Tools
-
-### Monit (AppServer)
-
-- Port 2812
-- Username/password displayed at environment creation
-- Monitors NGINX, PHP-FPM, and local Redis
-
-### GoAccess (AppServer)
-
-- Access at `BASE_URL/site_report`
-- Protected with HTTP basic auth (credentials displayed at creation)
-- Updated daily via cron
-- Requires `/var/www/webroot/ROOT/go_access_exclude_list.txt` with URLs to ignore:
+Two environments, two add-ons. The PHP box is disposable; the services are not.
 
 ```
-/media
-/static
-/nginx_status
+┌─ PHP environment ───────────────┐     ┌─ Services environment ("Resource Server") ─┐
+│ AppServer  (cp, docker          │     │ nginx node  (cp)   n8n, cron health check    │
+│   jelastic/nginxphp:<tag>)      │────▶│ MariaDB     (sqldb)                          │
+│   nginx, php-fpm, local redis   │     │ Redis       (nosqldb)  sessions              │
+│   fail2ban, monit, goaccess     │◀────│ OpenSearch  (es)                             │
+│   add-on: Magento PHP Box       │ ssh │ NFS         (storage)  media                 │
+└─────────────────────────────────┘     │ add-on: Magento Services                     │
+                                        └──────────────────────────────────────────────┘
 ```
 
-### AWS CLI v2 (AppServer)
+| File | Type | Installs onto |
+|------|------|---------------|
+| `manifest.jps` | `install` | New PHP environment: one docker `cp` node, then installs the PHP Box add-on |
+| `addons/phpbox-addon.jps` | `update` | `cp` layer of a PHP environment |
+| `addons/services-addon.jps` | `update` | `cp` layer of the services environment (reaches `sqldb`/`nosqldb`/`es` by group) |
 
-Installed for S3 backup operations. Configure credentials with `aws configure`.
+## Why add-ons
 
-### Node.js 20 LTS (AppServer)
+A PHP update used to mean a new environment: slow, and the external IP changed.
+Now PHP is updated in place with the dashboard's **Redeploy Containers** dialog.
+Redeploy keeps the volumes (`/var/www/webroot/ROOT`, `/var/www/webroot/nfs`) and
+the paths in `/etc/jelastic/redeploy.conf` (`/etc/php.d/`, `/etc/php-fpm.conf`,
+`/var/spool/cron/nginx`, `/var/lib/nginx/.ssh/`) and wipes everything else:
+`/etc/nginx`, yum packages, root cron, `/etc/hosts`, monit, fail2ban.
 
-Installed for Hyva theme Tailwind CSS compilation. Run `npm ci` in your theme's `web/tailwind` directory.
+The PHP Box add-on hooks `onAfterRedeployContainer` and re-runs
+`scripts/provision-cp.sh`, so the box is fully configured again before the
+dialog closes. The Let's Encrypt add-on does the same for its certificate.
 
-## Post-Provisioning Verification Checklist
+## Install order
 
-After the JPS manifest runs, verify each fix was applied correctly. These address known Jelastic default configuration issues discovered during the April 2026 migration.
+### 1. Services environment
 
-### App Node (cp)
+Already exists (`lcd-live`). Apply the add-on once:
 
-**1. Verify Jelastic default SSH keys are removed**
+1. Dashboard → **Import** → **URL** →
+   `https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/addons/services-addon.jps`
+2. Pick the services environment. Fill: Magento DB user/password, alert
+   email, n8n allowlist/port, Gemini key (optional). Leave *PHP box internal
+   IP* blank if the PHP env does not exist yet.
+3. Success text lists the internal IPs of DB / Redis / OpenSearch - needed
+   for step 2.
+4. Add-ons tab on the nginx node → **Show monitor SSH key** → copy.
+
+Environments that lack a Redis or OpenSearch layer (ehop: nginxphp + mysql8 +
+storage only) get them created by the add-on (`addNodes`, layers `nosqldb` /
+`es`, OpenSearch version chosen in the dialog). Data provisioning skips
+layers that do not exist. MySQL 8 and MariaDB are both handled.
+
+What it does: MariaDB/MySQL hardening + `check_mariadb.sh`, Redis config +
+`check_redis_sessions.sh`, OpenSearch plugins/config + `check_opensearch.sh`
+(each node only restarts if its config actually changed), n8n with the
+`Server Monitor` workflow on the nginx node, Magento cron health check from
+the nginx node (DB is local; `cron:run` kicked on the PHP box over SSH).
+
+### 2. PHP environment
+
+New env: **Import** → **URL** → `.../main/manifest.jps`. Pick PHP tag, enter
+the three services IPs, alert email, paste the monitor key.
+
+Existing env (e.g. `newphplive`): **Import** → **URL** →
+`.../main/addons/phpbox-addon.jps`, pick the env, same fields. Test on a
+**clone** first - the provisioner rewrites `/etc/nginx/nginx.conf`,
+`/etc/php.d/*`, fail2ban and monit (it never touches
+`conf.d/SITES_ENABLED/`, `conf.d/CORS/`, `ssl.conf` or `.htpasswd` once they
+exist).
+
+Then: bind domain, deploy code, install the **Let's Encrypt** add-on on the
+`cp` layer (webroot on, path `/var/www/webroot/ROOT/pub`, fallback to X1 on).
+`nossl.conf` serves `/.well-known/acme-challenge/` for the webroot check.
+
+Back on the services add-on: **Configure** → set *PHP box internal IP* so the
+remote snapshot and cron kick know where to go.
+
+## Updating PHP
+
+1. PHP env → AppServer layer → **Redeploy Containers** → choose tag → confirm.
+2. Wait for the add-on's `onAfterRedeployContainer` to finish
+   (`/var/log/phpbox-provision.log`, last line `provisioned OK`).
+3. `php -v`, `curl -I https://domain/`, check monit on `:2812`.
+
+Nothing else changes: IP, certificate, crontab, code, media.
+
+`/etc/php.d/` survives the redeploy, which is why the provisioner regenerates
+it and drops any `extension=` line whose `.so` does not exist in the new
+image (imap gone in 8.4, opcache built in from 8.5).
+
+Jelastic publishes PHP patch images a few weeks after php.net. The
+`docker/nginxphp/` image + `.github/workflows/nginxphp-image.yml` rebuild PHP
+from source on the newest Jelastic base and publish
+`ghcr.io/proxiblue/nginxphp:<tag>`; add ghcr as a custom registry in the
+Redeploy dialog to use it. Not yet proven on a real redeploy.
+
+## Add-on buttons
+
+**Magento PHP Box** (PHP env, `cp` layer)
+
+| Button | Does |
+|--------|------|
+| Re-apply configuration | Re-runs `provision-cp.sh` with the stored settings |
+| Update fail2ban filters | Pulls filters/jails from the repo, restarts fail2ban |
+| Authorize monitor key | Adds a public key to `nginx`'s `authorized_keys` |
+| Show credentials | Prints `/root/phpbox-credentials.txt` (system, stats, monit passwords) |
+
+**Magento Services** (services env, `cp` layer)
+
+| Button | Does |
+|--------|------|
+| Add missing Redis / OpenSearch nodes | `addNodes` for absent `nosqldb` / `es` layers |
+| Re-apply configuration | Re-provisions all nodes |
+| Configure | Edit settings (PHP box IP, DB creds, n8n, schedule) and re-apply to the nginx node |
+| Show monitor SSH key | Prints the key to authorise on the PHP box |
+| Update n8n | `npm install -g n8n@latest` + restart |
+
+Pin **Config repo ref** to a commit sha while testing: raw.githubusercontent
+caches `main` for ~5 minutes after a push.
+
+## What lives where
+
+**PHP box** - everything that must see the local kernel, sockets or logs:
+nginx + php-fpm (`configs/nginx`, `configs/php`), local Redis for Magento
+cache on `/tmp/redis.sock`, fail2ban (`nginx-badurls`, `nginx-search`,
+`nginx-magento-admin`, auto-updated daily), monit (nginx, php-fpm, redis;
+port 2812), logrotate, GoAccess daily report at `/site_report` (basic auth
+`stats`), S3 media backup cron, Node.js 22 (Hyva/Tailwind), AWS CLI v2,
+`n8n-server-snapshot.sh` (read-only collector the services node calls over
+SSH as `nginx` via a one-line sudoers rule).
+
+**Services nginx node** - n8n (`configs/n8n/`, SQLite, nginx-proxied on the
+chosen port behind an IP allowlist), `n8n-services-snapshot.sh` (local
+DB/Redis/OpenSearch health + the PHP box snapshot over SSH, same path as the
+local collector so the shipped workflow is unchanged),
+`check_magento_cron.sh` every 5 min, config in `/etc/magento-monitor.env`.
+
+**Data nodes** - healthcheck cron every 2 min, restart after 3 failures
+(`configs/healthchecks/`), logrotate, hardening (`skip-symbolic-links`,
+`local-infile=0`, phpMyAdmin denied; OpenSearch security plugin off, single
+node, `analysis-icu` + `analysis-phonetic` for ElasticSuite).
+
+Persisted state on the PHP box across redeploys (added to `redeploy.conf` by
+the provisioner): `/etc/phpbox.env`, `/root/phpbox-credentials.txt`,
+`/root/.ssh/`, `/etc/nginx/.htpasswd`, `/etc/nginx/conf.d/SITES_ENABLED/`,
+`/etc/nginx/conf.d/CORS/`, `/var/spool/cron/root`, `/var/lib/redis/`.
+
+## Security notes
+
+- PHP: `expose_php=Off`, `allow_url_include=Off`, `open_basedir` limited to
+  the Magento root, `/tmp`, the composer cache and the PHP binary path,
+  `disable_functions=passthru` (`proc_open`/`popen` stay: Composer and
+  `setup:di:compile` need them), secure session cookies,
+  `request_terminate_timeout=600s`, slowlog at 30s.
+- nginx: rate limits on admin (30r/s), customer login (2r/s), REST/GraphQL
+  (10r/s); 50 connections per IP; security headers; PHP execution only for
+  `index.php`, `get.php`, `static.php`, `health_check.php`, error handlers;
+  dotfiles and `.php` under `media/` denied; php-fpm status/ping localhost
+  only; static assets immutable for a year.
+- MariaDB 12.x needs `patches/composer/allow-mariadb-12.patch` in the Magento
+  project (adds `^12\.` to the SqlVersionProvider DI config).
+
+## Verification after provisioning
+
+PHP box:
+
 ```bash
-# On each node (cp, sqldb, nosqldb, es):
-cat /root/.ssh/authorized_keys
-cat /var/lib/nginx/.ssh/authorized_keys  # cp node only
-# Should NOT contain any key with "jelastic" in the comment
+tail -3 /var/log/phpbox-provision.log           # last line: "... provisioned OK"
+php -i | grep -E 'disable_functions|open_basedir' # passthru only; composer cache + /usr/lib64/jelastic_php present
+php -r 'echo 1;' 2>&1 | head -1                   # no startup warnings
+curl -s -o /dev/null -w '%{http_code}\n' https://DOMAIN/media/customer/test.php   # 403
+systemctl is-active nginx php-fpm redis monit fail2ban
+cat /etc/jelastic/redeploy.conf | sed -n '/CUSTOM/,/SYSTEM/p'
 ```
 
-**2. Verify PHP `proc_open`/`popen` are NOT disabled**
+Services nginx node:
+
 ```bash
-php -i | grep disable_functions
-# Should show only: passthru
-# If proc_open or popen appear, edit /etc/php.d/custom.ini
+tail -3 /var/log/services-provision.log
+systemctl is-active n8n
+sudo -u n8n ssh -i /var/lib/n8n/.ssh/id_ed25519 -o BatchMode=yes nginx@PHPBOX true && echo ssh-ok
+sudo /usr/local/bin/n8n-server-snapshot.sh | head -40
 ```
 
-**3. Verify PHP `open_basedir` includes composer cache and PHP binary path**
-```bash
-php -i | grep open_basedir
-# Must include: /var/lib/nginx/.composer and /usr/lib64/jelastic_php
-# Test: php -r "var_dump(is_dir('/var/lib/nginx/.composer'));"  # should not error
-```
+Data nodes: `/var/log/mysql/healthcheck.log`, `/var/log/redis_healthcheck.log`,
+`/var/log/opensearch/healthcheck.log`; `opensearch-plugin list` shows
+`analysis-icu` and `analysis-phonetic`.
 
-**4. Verify nginx blocks PHP execution in media upload directories**
-```bash
-curl -s -o /dev/null -w "%{http_code}" https://YOURDOMAIN/media/customer_address/test.php
-# Should return 403
-curl -s -o /dev/null -w "%{http_code}" https://YOURDOMAIN/media/customer/test.php
-# Should return 403
-curl -s -o /dev/null -w "%{http_code}" https://YOURDOMAIN/media/import/test.php
-# Should return 403
-```
+## Cron summary
 
-**5. Verify deploy script does not reference `pub/index.php.live`**
-```bash
-grep -r "index.php.live" /var/www/webroot/
-# Should return no results. If found, update the deploy script — store routing
-# is now handled in the main pub/index.php.
-```
-
-**6. Verify CrowdSec is running with firewall bouncer**
-```bash
-systemctl status crowdsec
-# Should be active (running)
-systemctl status crowdsec-firewall-bouncer
-# Should be active (running)
-cscli bouncers list
-# Should show the firewall bouncer as connected
-cscli collections list | grep -E "nginx|linux|base-http|http-cve"
-# Should show all four collections installed and enabled
-cscli metrics
-# Should show log sources being parsed (may take a minute after startup)
-```
-
-### OpenSearch Node (es)
-
-**7. Verify data directory exists and is writable**
-```bash
-ls -la /var/lib/opensearch
-# Should exist and be owned by opensearch:opensearch
-```
-
-**8. Verify Java symlink**
-```bash
-ls -la /usr/java/latest
-# Should be a symlink to /usr/share/opensearch/jdk
-java -version
-# Should return the bundled OpenSearch JDK version
-```
-
-**9. Verify opensearch.yml is not immutable and has correct config**
-```bash
-lsattr /usr/share/opensearch/config/opensearch.yml
-# Should NOT show 'i' flag (immutable)
-grep "plugins.security.disabled" /usr/share/opensearch/config/opensearch.yml
-# Should show: plugins.security.disabled: true
-grep "discovery.type" /usr/share/opensearch/config/opensearch.yml
-# Should show: discovery.type: single-node
-```
-
-**10. Verify analysis plugins are installed**
-```bash
-/usr/share/opensearch/bin/opensearch-plugin list
-# Must include: analysis-icu, analysis-phonetic
-# Without these, ElasticSuite catalog search indexing fails with:
-#   "Unknown filter type [phonetic]"
-```
-
-**11. Verify OpenSearch is running and healthy**
-```bash
-curl -s http://localhost:9200/_cluster/health | python3 -m json.tool
-# status should be "green" or "yellow" (not "red")
-```
-
-### Redis Node (nosqldb)
-
-**12. Verify protected mode is disabled**
-```bash
-redis-cli CONFIG GET protected-mode
-# Should return: protected-mode no
-# If "yes", connections from the app node will be refused
-```
-
-**13. Test connectivity from the app node**
-```bash
-# From the cp node:
-redis-cli -h RD_MASTER ping
-# Should return: PONG
-```
-
-### Database (sqldb)
-
-**14. Verify MariaDB version compatibility**
-```bash
-mysql --version
-# If MariaDB 12.x, you need the composer patch at:
-#   patches/composer/allow-mariadb-12.patch
-# This adds ^12\. to the SqlVersionProvider DI config in Mage-OS.
-# Apply in the Magento project root:
-#   composer patch patches/composer/allow-mariadb-12.patch
-```
-
-### Quick Smoke Test
-
-After all verifications pass, run a full deploy cycle on the app node:
-```bash
-# As nginx user on the cp node:
-cd /var/www/webroot/ROOT
-composer install --no-dev
-bin/magento setup:di:compile       # needs proc_open
-bin/magento setup:static-content:deploy
-bin/magento cache:flush
-```
-
-## Post-Deploy Tasks
-
-1. Stop and start the entire environment (ensures all services start correctly with supervisord)
-2. Bind your domain
-3. Install the Let's Encrypt add-on (see [SSL](#ssl)) and verify the certificate issued
-
-## Cron Schedule Summary
-
-| Node | Script | Schedule |
-|------|--------|----------|
-| AppServer | `check_magento_cron.sh` | Every 5 min |
-| AppServer | `fail2banUpdate.sh` | Daily 5AM |
-| AppServer | GoAccess report | Daily 1AM |
-| AppServer | Media S3 backup | Daily 5AM |
-| AppServer | Clear import dir | Weekly Sunday 8:05AM |
-| Database | `check_mariadb.sh` | Every 2 min |
-| Sessions | `check_redis_sessions.sh` | Every 2 min |
-| Search | `check_opensearch.sh` | Every 2 min |
+| Node | Job | Schedule |
+|------|-----|----------|
+| PHP box (root) | `fail2banUpdate.sh` | daily 05:00 |
+| PHP box (nginx) | S3 media backup | daily 05:00 |
+| PHP box (nginx) | GoAccess report | daily 01:00 |
+| PHP box (nginx) | clear `pub/media/import` | Sunday 08:05 |
+| Services nginx | `check_magento_cron.sh` | every 5 min |
+| Services nginx | n8n Server Monitor workflow | setting (default every 4 h) |
+| sqldb / nosqldb / es | service health check | every 2 min |

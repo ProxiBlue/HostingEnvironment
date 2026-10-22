@@ -1,0 +1,147 @@
+type: update
+jpsVersion: '1.7.3'
+id: proxiblue-magento-phpbox
+name: Magento PHP Box
+description:
+  short: Configures the AppServer (nginx/php-fpm) node for Magento 2 and
+    re-applies itself after every container redeploy (PHP version change).
+
+baseUrl: https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/
+
+targetNodes:
+  nodeGroup: cp
+
+settings:
+  main:
+    fields:
+    - caption: Services env - MariaDB internal IP
+      type: string
+      name: DB_HOST
+      required: true
+    - caption: Services env - Redis (sessions) internal IP
+      type: string
+      name: REDIS_HOST
+      required: true
+    - caption: Services env - OpenSearch internal IP
+      type: string
+      name: ES_HOST
+      required: true
+    - caption: Alert / backup email
+      type: string
+      name: BACKUP_EMAIL
+      required: true
+    - caption: Monitor SSH public key
+      type: text
+      name: MONITOR_SSH_KEY
+      required: false
+      description: Public key printed by the Services add-on. Lets the services
+        node's n8n pull a health snapshot from this box over SSH. Can be added
+        later via the "Authorize monitor key" button.
+    - caption: Config repo ref
+      type: string
+      name: REPO_REF
+      value: main
+      required: true
+      description: Git ref of ProxiBlue/HostingEnvironment to pull configs
+        from. Pin a commit sha to avoid raw.githubusercontent cache lag.
+  monitorKey:
+    fields:
+    - caption: Monitor SSH public key
+      type: text
+      name: MONITOR_SSH_KEY
+      required: true
+
+globals:
+  provisionUrl: ${baseUrl}scripts/provision-cp.sh
+
+onInstall:
+  - provision
+
+# GUI "Redeploy Containers" (PHP tag change) wipes everything outside the
+# volumes and redeploy.conf; run the provisioner again on the fresh image.
+onAfterRedeployContainer [cp]:
+  - provision
+
+onUninstall:
+  - cmd [cp]: |-
+      systemctl disable --now monit fail2ban 2>/dev/null || true
+      rm -f /etc/sudoers.d/phpbox-monitor
+      sed -i '/fail2banUpdate.sh/d' /var/spool/cron/root 2>/dev/null || true
+    user: root
+
+buttons:
+  - caption: Re-apply configuration
+    confirmText: Re-run the provisioner (configs, packages, crons) on the AppServer?
+    loadingText: Provisioning...
+    action: provision
+    successText: AppServer re-provisioned. Log at /var/log/phpbox-provision.log.
+  - caption: Update fail2ban filters
+    loadingText: Updating...
+    action: updateFail2ban
+    successText: fail2ban filters refreshed from the repo and service restarted.
+  - caption: Authorize monitor key
+    settings: monitorKey
+    loadingText: Adding key...
+    action: authorizeMonitorKey
+    successText: Key added to nginx's authorized_keys on the AppServer.
+  - caption: Show credentials
+    loadingText: Reading...
+    action: showCredentials
+
+actions:
+  provision:
+    - cmd [cp]: |-
+        export DB_HOST='${settings.DB_HOST:}'
+        export REDIS_HOST='${settings.REDIS_HOST:}'
+        export ES_HOST='${settings.ES_HOST:}'
+        export BACKUP_EMAIL='${settings.BACKUP_EMAIL:}'
+        export MONITOR_SSH_KEY='${settings.MONITOR_SSH_KEY:}'
+        export REPO_REF='${settings.REPO_REF:main}'
+        curl -fsSL "https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${settings.REPO_REF:main}/scripts/provision-cp.sh" -o /root/provision-cp.sh
+        chmod +x /root/provision-cp.sh
+        set -o pipefail
+        bash /root/provision-cp.sh 2>&1 | tee -a /var/log/run.log
+      user: root
+      sayYes: true
+
+  updateFail2ban:
+    - cmd [cp]: bash /root/fail2banUpdate.sh
+      user: root
+
+  authorizeMonitorKey:
+    - cmd [cp]: |-
+        ak=/var/lib/nginx/.ssh/authorized_keys
+        install -d -m 0700 -o nginx -g nginx /var/lib/nginx/.ssh
+        touch "$ak"; chown nginx:nginx "$ak"; chmod 0600 "$ak"
+        key='${settings.MONITOR_SSH_KEY}'
+        grep -qF -- "$key" "$ak" || echo "$key" >> "$ak"
+      user: root
+
+  showCredentials:
+    - cmd [cp]: |-
+        cat /root/phpbox-credentials.txt
+        echo
+        echo "Monit: http://$(hostname -I | awk '{print $1}'):2812  user admin"
+        echo "GoAccess: BASE_URL/site_report  user stats"
+      user: root
+    - return:
+        type: success
+        message: |
+          ```
+          ${response.responses.out}
+          ```
+
+success:
+  text: |
+    ## Magento PHP Box add-on installed
+
+    * Credentials: **Show credentials** button on the add-on (also in
+      `/root/phpbox-credentials.txt` on the AppServer).
+    * Services: DB `DB_MASTER` (${settings.DB_HOST}), sessions Redis
+      `RD_MASTER` (${settings.REDIS_HOST}), OpenSearch `ES_MASTER`
+      (${settings.ES_HOST}). Local cache Redis on socket `/tmp/redis.sock`.
+    * PHP update: **Redeploy Containers** on the AppServer, pick the new tag.
+      The add-on re-provisions automatically afterwards.
+    * SSL: install the Let's Encrypt add-on on this layer (webroot
+      `/var/www/webroot/ROOT/pub`).
+    * Log: `/var/log/phpbox-provision.log`

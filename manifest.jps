@@ -1,23 +1,16 @@
 jpsType: install
 jpsVersion: '1.7.3'
-name: Standalone Magento Environment
+name: Magento PHP Box (AppServer only)
+description:
+  short: Single nginx/php-fpm node for Magento 2. DB, sessions Redis and
+    OpenSearch live in a separate services environment. All box
+    configuration comes from the "Magento PHP Box" add-on, which re-applies
+    itself after every container redeploy.
 
 baseUrl: https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/
 
-globals:
-  DB_USER: ${fn.random}
-  DB_PASS: ${fn.password(10)}
-  RD_PASS: ${fn.password(10)}
-  NGINX_PASS: ${fn.password(10)}
-  STATS_PASS: ${fn.password(10)}
-  MONIT_PASS: ${fn.password(10)}
 settings:
   fields:
-  -  caption: Backup Email
-     type: text
-     required: true
-     name: BACKUP_EMAIL
-     value: ""
   - caption: "PHP Version"
     type: list
     values:
@@ -25,119 +18,63 @@ settings:
     required: true
     name: PHP_VERSION
     value: 1.30.6-php-8.4.27-almalinux-9
-  - caption: "OpenSearch Version"
-    type: list
-    values:
-        2.19.2-openjdk-11.0.25-almalinux-9 : 2.19.2
-        3.6.0-openjdk-21.0.2-almalinux-9 : 3.6.0
-    required: true
-    name: OS_VERSION
-    value: 2.19.2-openjdk-11.0.25-almalinux-9
-  - caption: "Gemini API Key (n8n monitor workflow)"
+  - caption: Services env - MariaDB internal IP
     type: string
-    required: false
-    name: GEMINI_API_KEY
-    value: ""
-    description: "Optional. Google AI Studio key. Leave blank to install n8n without a key; set it later by editing /etc/n8n/n8n.env and running 'systemctl restart n8n'."
-  - caption: "Monitor Workflow Schedule"
-    type: list
-    values:
-        "0 */4 * * *": "Every 4 hours (default)"
-        "0 */6 * * *": "Every 6 hours"
-        "0 2 * * *": "Daily at 02:00"
+    name: DB_HOST
     required: true
-    name: MONITOR_SCHEDULE
-    value: "0 */4 * * *"
-  - caption: "n8n UI IP Allowlist"
+  - caption: Services env - Redis (sessions) internal IP
+    type: string
+    name: REDIS_HOST
+    required: true
+  - caption: Services env - OpenSearch internal IP
+    type: string
+    name: ES_HOST
+    required: true
+  - caption: Alert / backup email
+    type: string
+    name: BACKUP_EMAIL
+    required: true
+  - caption: Monitor SSH public key (optional)
     type: text
+    name: MONITOR_SSH_KEY
+    required: false
+  - caption: Config repo ref
+    type: string
+    name: REPO_REF
+    value: main
     required: true
-    name: N8N_ALLOWED_IPS
-    value: ""
-    description: "Comma-separated CIDRs allowed to reach the n8n UI (e.g. '203.0.113.4/32, 198.51.100.0/24'). Leave blank only if you intend to edit /etc/nginx/conf.d/n8n.conf manually before exposing."
-  - caption: "n8n UI Port"
-    type: list
-    values:
-        "8443": "8443 (default)"
-        "8080": "8080"
-        "5679": "5679 (avoid - collides with n8n task-runner default)"
-    required: true
-    name: N8N_PORT
-    value: "8443"
 
 skipNodeEmails: true
 
 nodes:
-# Pull the exact jelastic/nginxphp tag from Docker Hub, like the OpenSearch
-# node. nodeType: nginxphp-dockerized + tag silently falls back to the
-# provider's default stack (PHP 8.5.11) when its catalog lacks the tag.
+# Pulled straight from Docker Hub: nodeType nginxphp-dockerized + tag silently
+# falls back to the provider's default stack when its catalog lacks the tag.
 - nodeType: docker
   image: jelastic/nginxphp:${settings.PHP_VERSION}
   count: 1
   cloudlets: 74
   extip: 1
-  links:
-    - sqldb:DB
-    - redis:REDIS
   nodeGroup: cp
+  displayName: AppServer
   volumes:
     - /var/www/webroot/ROOT
     - /var/www/webroot/nfs
-  displayName: AppServer
   env:
     PHPFPM_MAX_CHILDREN: 1000
     REDIS_ENABLED: 1
-    BACKUP_FAIL_FROM: ${settings.BACKUP_EMAIL}
-    BACKUP_FAIL_TO: ${settings.BACKUP_EMAIL}
-
-- nodeType: mariadb-dockerized
-  tag: 11.4-almalinux-9
-  count: 1
-  cloudlets: 28
-  displayName: Database
-  diskLimit: 200G
-  nodeGroup: sqldb
-
-- nodeType: redis
-  tag: 7.2.4-almalinux-9
-  count: 1
-  cloudlets: 28
-  displayName: Redis for Sessions
-  diskLimit: 10G
-  nodeGroup: nosqldb
-
-- nodeType: docker
-  count: 1
-  cloudlets: 28
-  displayName: OpenSearch
-  diskLimit: 100G
-  nodeGroup: es
-  image: jelastic/opensearch:${settings.OS_VERSION}
-  env:
-    DISABLE_INSTALL_DEMO_CONFIG: "true"
-    OPENSEARCH_JAVA_OPTS: "-Xms4g -Xmx4g"
-  entrypoint: ["/usr/bin/supervisord","-c","/etc/supervisord.conf"]
 
 onInstall:
   - checkPhpVersion
-  - setNodeDisplayName [cp]: AppServer
-  - setNodeDisplayName [sqldb]: DataBase
-  - createDb
-  - secureDb
-  - hardenDb
-  - SetupAccess
-  - InstallCPYumPackages
-  - setupCPConfigs
-  - setupCPPackages
-  - setupCrowdSec
-  - setupN8N
-  - setupCPNonRoot
-  - setupRD
-  - setupES
-  - restartNodes:
-     nodeGroup:
-      - cp
-      - es
-      - nosqldb
+  - install:
+      jps: ${baseUrl}addons/phpbox-addon.jps
+      nodeGroup: cp
+      settings:
+        DB_HOST: ${settings.DB_HOST}
+        REDIS_HOST: ${settings.REDIS_HOST}
+        ES_HOST: ${settings.ES_HOST}
+        BACKUP_EMAIL: ${settings.BACKUP_EMAIL}
+        MONITOR_SSH_KEY: ${settings.MONITOR_SSH_KEY:}
+        REPO_REF: ${settings.REPO_REF}
 
 actions:
   checkPhpVersion:
@@ -148,263 +85,14 @@ actions:
       echo "AppServer PHP $have, expected $want"
       [ "$have" = "$want" ] || exit 1
     user: root
-  SetupAccess:
-  - log: Set Access
-  - cmd [cp]: |-
-      echo ${globals.NGINX_PASS}| passwd --stdin nginx &>> /var/log/run.log
-      echo ${globals.NGINX_PASS}| passwd --stdin root &>> /var/log/run.log
-    user: root
-    sayYes: true
-  createDb:
-  - cmd [sqldb]: |-
-      wget https://raw.githubusercontent.com/jelastic-jps/mysql-cluster/master/scripts/setupUser.sh -O ~/setupUser.sh &>> /var/log/run.log
-      bash ~/setupUser.sh ${globals.DB_USER} ${globals.DB_PASS} &>> /var/log/run.log
-      mysql -u${globals.DB_USER} -p${globals.DB_PASS} -e "CREATE DATABASE IF NOT EXISTS magento;"
-    user: root
-  secureDb:
-  - cmd [sqldb]: |-
-      sed -i 's/Require all granted/Require all denied/g' /etc/httpd/conf.d/phpMyAdmin-jel.conf
-      echo ${globals.NGINX_PASS}| passwd --stdin root &>> /var/log/run.log
-    user: root
-  hardenDb:
-  - log: Harden MariaDB configuration
-  - cmd [sqldb]: |-
-      cat >> /etc/my.cnf << 'DBEOF'
 
-      [mysqld]
-      skip-symbolic-links = 1
-      local-infile = 0
-      bind-address = 0.0.0.0
-      max_allowed_packet = 128M
-      log_error = /var/log/mysql/error.log
-      DBEOF
-      mkdir -p /var/log/mysql
-      chown mysql:mysql /var/log/mysql
-      systemctl restart mysql &>> /var/log/run.log
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/logrotate/mariadb > /etc/logrotate.d/mariadb
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/healthchecks/check_mariadb.sh > /root/check_mariadb.sh
-      chmod +x /root/check_mariadb.sh
-      echo "*/2 * * * * /bin/bash /root/check_mariadb.sh" >> /var/spool/cron/root
-    user: root
-    sayYes: true
-  setupES:
-  - log: Setup OpenSearch server
-  - cmd [es]: |-
-      yum install -y epel-release &>> /var/log/run.log
-      yum update -y &>> /var/log/run.log
-      yum install -y supervisor &>> /var/log/run.log
-      systemctl enable supervisord &>> /var/log/run.log
-      mkdir -p /var/log/supervisor
-      mkdir -p /var/log/opensearch
-      mkdir -p /var/lib/opensearch
-      chown opensearch:opensearch /var/lib/opensearch
-      ln -sf /usr/share/opensearch/jdk /usr/java/latest
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/supervisord.conf > /etc/supervisord.conf
-      /usr/share/opensearch/bin/opensearch-plugin install analysis-icu &>> /var/log/run.log
-      /usr/share/opensearch/bin/opensearch-plugin install analysis-phonetic &>> /var/log/run.log
-      chattr -i /usr/share/opensearch/config/opensearch.yml 2>/dev/null || true
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/opensearch.yml > /usr/share/opensearch/config/opensearch.yml
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/es/jvm.options > /usr/share/opensearch/config/jvm.options
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/logrotate/opensearch > /etc/logrotate.d/opensearch
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/healthchecks/check_opensearch.sh > /root/check_opensearch.sh
-      chmod +x /root/check_opensearch.sh
-      echo "*/2 * * * * /bin/bash /root/check_opensearch.sh" >> /var/spool/cron/root
-    user: root
-    sayYes: true
-  setupRD:
-  - log: Setup Redis cache server
-  - cmd [nosqldb]: |-
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/redis/redis.conf > /etc/redis.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/restart.conf > /etc/systemd/system/redis.service.d/restart.conf &>> /var/log/run.log
-      systemctl daemon-reload &>> /var/log/run.log
-      systemctl restart redis &>> /var/log/run.log
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/healthchecks/check_redis_sessions.sh > /root/check_redis_sessions.sh
-      chmod +x /root/check_redis_sessions.sh
-      echo "*/2 * * * * /bin/bash /root/check_redis_sessions.sh" >> /var/spool/cron/root
-    user: root
-    sayYes: true
-  InstallCPYumPackages:
-  - log: Setup Yum packages
-  - cmd [cp]: |-
-      yum update
-      curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - &>> /var/log/run.log
-      yum install -y nodejs &>> /var/log/run.log
-      yum install epel-release &>> /var/log/run.log
-      yum update
-      yum install -y joe pv monit libsodium httpd-tools goaccess libwebp-tools &>> /var/log/run.log
-    user: root
-    sayYes: true
-  setupCPConfigs:
-  - log: Setup Config files
-  - cmd [cp]: |-
-      mkdir -p /etc/monit.d/
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/nginxmonitor > /etc/monit.d/nginx
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/phpfpmmonitor > /etc/monit.d/phpfpm
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/monit/redismonitor > /etc/monit.d/redis
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/custom.ini > /etc/php.d/custom.ini
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/extensions.ini > /etc/php.d/extensions.ini
-      # PHP 8.5+ compiles OPcache in and ships no opcache.so to load.
-      php -n -r 'exit(extension_loaded("Zend OPcache") ? 0 : 1);' && sed -i '/^zend_extension=.*opcache\.so/d' /etc/php.d/extensions.ini
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/assert_off.ini > /etc/php.d/assert_off.ini
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/error-level.ini > /etc/php.d/error-level.ini
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nginx.conf > /etc/nginx/nginx.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/nossl.conf > /etc/nginx/conf.d/nossl.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/ssl.conf.disabled > /etc/nginx/conf.d/ssl.conf.disabled
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/php/php-fpm.conf > /etc/php-fpm.conf
-      mkdir -p /etc/nginx/conf.d/SITES_ENABLED
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/site-default-mg2.conf > /etc/nginx/conf.d/SITES_ENABLED/site-default.conf
-      mkdir -p /etc/nginx/conf.d/CORS
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/CORS-CDN/cors.conf > /etc/nginx/conf.d/CORS/cors.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/nginx/stub_status.conf > /etc/nginx/conf.d/stub_status.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/restart.conf > /etc/systemd/system/redis.service.d/restart.conf
-      systemctl daemon-reload &>> /var/log/run.log
-      export REDIS_ENABLED=TRUE
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/redis/redis.conf > /etc/redis.conf
-      systemctl start redis &>> /var/log/run.log
-      systemctl enable redis &>> /var/log/run.log
-      systemctl restart nginx &>> /var/log/run.log
-      sudo jem service restart  &>> /var/log/run.log
-      echo ${nodes.sqldb.master.intIP} DB_MASTER >> /etc/hosts
-      echo ${nodes.nosqldb.master.intIP} RD_MASTER >> /etc/hosts
-      echo ${nodes.es.first.intIP} ES_MASTER >> /etc/hosts
-      echo "export BACKUP_FAIL_FROM=${settings.BACKUP_EMAIL}" >> /etc/environment
-      echo "export BACKUP_FAIL_TO=${settings.BACKUP_EMAIL}" >> /etc/environment
-      cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-      sed -i 's/findtime  = 10m/findtime = 50/g' /etc/fail2ban/jail.local
-      sed -i 's/maxretry = 5/maxretry = 3/g' /etc/fail2ban/jail.local
-      sed -i 's/sender = root@<fq-hostname>/sender = ${settings.BACKUP_EMAIL}/g' /etc/fail2ban/jail.local
-      sed -i 's/destemail = root@localhost/destemail = ${settings.BACKUP_EMAIL}/g' /etc/fail2ban/jail.local
-      sed -i 's/action = %(action_)s/action = %(action_mwl)s/g' /etc/fail2ban/jail.local
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-badurls.conf > /etc/fail2ban/filter.d/nginx-badurls.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-badurls.conf > /etc/fail2ban/jail.d/nginx-badurls.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-search.conf > /etc/fail2ban/filter.d/nginx-search.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-search.conf > /etc/fail2ban/jail.d/nginx-search.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/filter.d/nginx-magento-admin.conf > /etc/fail2ban/filter.d/nginx-magento-admin.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/jail.d/nginx-magento-admin.conf > /etc/fail2ban/jail.d/nginx-magento-admin.conf
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/fail2ban/fail2banUpdate.sh > /root/fail2banUpdate.sh
-      echo "0 5 * * * /bin/bash /root/fail2banUpdate.sh >/var/log/fail2ban.log" >> /var/spool/cron/root
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/logrotate/magento-stack > /etc/logrotate.d/magento-stack
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/healthchecks/check_magento_cron.sh > /root/check_magento_cron.sh
-      chmod +x /root/check_magento_cron.sh
-      echo "*/5 * * * * /bin/bash /root/check_magento_cron.sh" >> /var/spool/cron/root
-    user: root
-    sayYes: true
-  setupCPPackages:
-  - log: Setup Packages
-  - cmd [cp]: |-
-      curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" &>> /var/log/run.log
-      unzip awscliv2.zip &>> /var/log/run.log
-      ./aws/install &>> /var/log/run.log
-      htpasswd -b -c /etc/nginx/.htpasswd stats ${globals.STATS_PASS}
-      chown nginx:nginx /etc/nginx/.htpasswd
-      sed -i -e "/use address localhost/d" /etc/monitrc
-      sed -i -e "/allow localhost/d" /etc/monitrc
-      sed -i -e "s/allow admin:monit/allow admin:${globals.MONIT_PASS}/g" /etc/monitrc
-      systemctl enable monit &>> /var/log/run.log
-      systemctl start monit &>> /var/log/run.log
-      yum install -y fail2ban &>> /var/log/run.log
-      systemctl enable fail2ban &>> /var/log/run.log
-    user: root
-    sayYes: true
-  setupCrowdSec:
-  - log: Install and configure CrowdSec with firewall bouncer
-  - cmd [cp]: |-
-      curl -s https://install.crowdsec.net | bash &>> /var/log/run.log
-      yum install -y crowdsec crowdsec-firewall-bouncer-iptables &>> /var/log/run.log
-      cscli collections install crowdsecurity/nginx &>> /var/log/run.log
-      cscli collections install crowdsecurity/linux &>> /var/log/run.log
-      cscli collections install crowdsecurity/base-http-scenarios &>> /var/log/run.log
-      cscli collections install crowdsecurity/http-cve &>> /var/log/run.log
-      cscli collections install crowdsecurity/magento &>> /var/log/run.log
-      cscli collections install crowdsecurity/appsec-virtual-patching &>> /var/log/run.log
-      cscli appsec-configs install crowdsecurity/virtual-patching &>> /var/log/run.log
-      curl https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/crowdsec/acquis.yaml > /etc/crowdsec/acquis.yaml
-      systemctl enable crowdsec &>> /var/log/run.log
-      systemctl start crowdsec &>> /var/log/run.log
-      systemctl enable crowdsec-firewall-bouncer &>> /var/log/run.log
-      systemctl start crowdsec-firewall-bouncer &>> /var/log/run.log
-      cscli bouncers add magento-bouncer -o raw > /root/crowdsec-magento-bouncer-key.txt 2>/dev/null
-      echo "0 4 * * * /usr/local/bin/cscli hub update && /usr/local/bin/cscli hub upgrade --force 2>&1 | logger -t crowdsec-hub-update" >> /var/spool/cron/root
-    user: root
-    sayYes: true
-  setupN8N:
-  - log: Install self-hosted n8n (npm, sqlite, nginx-proxied on a separate port)
-  - cmd [cp]: |-
-      export GEMINI_API_KEY='${settings.GEMINI_API_KEY}'
-      export MONITOR_SCHEDULE='${settings.MONITOR_SCHEDULE}'
-      export ALERT_EMAIL='${settings.BACKUP_EMAIL}'
-      export N8N_DOMAIN='n8n.${env.domain}'
-      export N8N_PUBLIC_PORT='${settings.N8N_PORT}'
-      export N8N_ALLOWED_IPS='${settings.N8N_ALLOWED_IPS}'
-      export REPO_BASE_URL='https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/configs/n8n'
-      curl -fsSL "$REPO_BASE_URL/install_n8n.sh" -o /tmp/install_n8n.sh
-      chmod +x /tmp/install_n8n.sh
-      # Tee output to /var/log/run.log AND stdout so Jelastic surfaces failures
-      # in the build dialog. Fatal on failure so problems are visible immediately.
-      set -o pipefail
-      bash /tmp/install_n8n.sh 2>&1 | tee -a /var/log/run.log
-    user: root
-    sayYes: true
-  setupCPNonRoot:
-  - log: Setup Non Root Parts
-  - cmd [cp]: |-
-      # Runs as root: by this point the nginx user can no longer write
-      # /var/spool/cron (seen on the 1.30.6-php-8.4.27 image). The crontab is
-      # handed back to nginx with the ownership/mode cronie expects.
-      mkdir -p /var/www/webroot/site_report/
-      chown nginx:nginx /var/www/webroot/site_report/
-      echo "0 5 * * * /bin/bash /var/www/webroot/ROOT/backup/backup_to_s3.sh media 2>&1 >/var/www/webroot/ROOT/var/log/backups.log" >> /var/spool/cron/nginx
-      echo "5 8 * * 0 rm -rf /var/www/webroot/ROOT/pub/media/import/* 2>&1 >/dev/null" >> /var/spool/cron/nginx
-      echo "0 1 * * * zcat /var/log/nginx/access*.gz | grep -v -f /var/www/webroot/ROOT/go_access_exclude_list.txt | goaccess -o /var/www/webroot/site_report/index.html --log-format=COMBINED - 2>&1 >/dev/null" >> /var/spool/cron/nginx
-      chown nginx:nginx /var/spool/cron/nginx
-      chmod 0600 /var/spool/cron/nginx
-    user: root
 success:
   text: |
-    ## Database: ${nodes.mariadb-dockerized.name}
+    ## AppServer created
 
-    * **Host**: ${nodes.mariadb-dockerized.intIP} or just use: DB_MASTER
-    * **Username**: ${globals.DB_USER}
-    * **Password**: ${globals.DB_PASS}
-    * **Database Name**: magento
+    Configuration, credentials and the self-healing bits are managed by the
+    **Magento PHP Box** add-on (Add-ons tab on the AppServer layer). Use its
+    **Show credentials** button for passwords.
 
-    ## Redis for Sessions
-
-    * **Host**: ${nodes.redis.intIP} or just use: RD_MASTER
-
-    ## Redis for Cache
-
-    * **Host**: ${nodes.cp.first.intIP} or just use: localhost on AppServer
-    * **socket**: It is preferred to use the socket /tmp/redis.sock
-
-    ## OpenSearch
-
-    * **Host**: ${nodes.es.first.intIP} or just use: ES_MASTER
-
-    ## AppServer Node / DB Node
-
-    * **password**: ${globals.NGINX_PASS}
-
-    ## STATS
-
-    * stats / ${globals.STATS_PASS}
-
-    ## MONIT on port 2812
-
-        * admin / ${globals.MONIT_PASS}
-
-    ## CrowdSec Magento Bouncer
-
-    * **API Key**: Saved to /root/crowdsec-magento-bouncer-key.txt on AppServer
-    * **LAPI URL**: http://127.0.0.1:8080
-    * Configure in Magento Admin: Stores > Configuration > Security > CrowdSec Bouncer
-
-    ## n8n (self-hosted workflow automation)
-
-    * **URL**: http://n8n.${env.domain}:${settings.N8N_PORT}/
-    * **First login**: open the URL from an allowlisted IP and create the owner account
-    * **IP allowlist**: ${settings.N8N_ALLOWED_IPS} (edit `/etc/nginx/conf.d/n8n.conf` to change)
-    * **Env file**: /etc/n8n/n8n.env (contains `GEMINI_API_KEY` and `N8N_MONITOR_SCHEDULE`; `systemctl restart n8n` after edits)
-    * **Data dir / SQLite**: /var/lib/n8n/database.sqlite
-    * **Log**: /var/log/n8n.log
-    * **Default workflow**: `Server Monitor` (security/health/Magento snapshot -> Gemini -> alert email). Imported automatically when present; otherwise import via UI from `/var/lib/n8n/workflows-pending/server-monitor.json`. Schedule: ${settings.MONITOR_SCHEDULE}.
+    Next: bind the domain, deploy code to `/var/www/webroot/ROOT`, install the
+    Let's Encrypt add-on on this layer (webroot `/var/www/webroot/ROOT/pub`).

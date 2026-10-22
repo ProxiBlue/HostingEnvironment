@@ -100,7 +100,7 @@ without DNS. To put TLS on `n8n.<domain>`:
 1. **Schedule** trigger fires on `N8N_MONITOR_SCHEDULE` (default every 4h).
 2. **Gather Snapshot** runs `sudo /usr/local/bin/n8n-server-snapshot.sh`. The
    script collects disk/memory/process info, recent failed logins,
-   nginx 4xx/5xx, CrowdSec decisions, fail2ban status, Magento exception +
+   nginx 4xx/5xx, fail2ban status, Magento exception +
    system logs, cache status, MariaDB ping, Redis ping. Every command has a
    10s timeout and exits 0; the helper never blocks the workflow.
 3. **Build Prompt** wraps the snapshot in a fixed-format SRE prompt asking

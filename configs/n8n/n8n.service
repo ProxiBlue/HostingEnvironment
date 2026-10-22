@@ -23,7 +23,9 @@ ExecStart=/usr/bin/n8n start
 Restart=on-failure
 RestartSec=5
 
-NoNewPrivileges=true
+# No NoNewPrivileges: the Server Monitor workflow runs the snapshot helper via
+# sudo (sudoers limits the n8n user to that one script); NoNewPrivileges=true
+# makes every sudo fail with "effective uid is not 0".
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only

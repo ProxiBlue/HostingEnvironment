@@ -153,8 +153,11 @@ EOF
 }
 
 install_snapshot_helper() {
-  log "installing $SNAPSHOT_BIN (root-owned data collector)"
-  curl -fsSL "$REPO_BASE_URL/n8n-server-snapshot.sh" -o "$SNAPSHOT_BIN"
+  # SNAPSHOT_SOURCE_FILE: n8n-server-snapshot.sh (local box, default) or
+  # n8n-services-snapshot.sh (services node: local services + ssh to PHP box).
+  # Always installed at $SNAPSHOT_BIN so the workflow JSON stays identical.
+  log "installing $SNAPSHOT_BIN from ${SNAPSHOT_SOURCE_FILE:-n8n-server-snapshot.sh}"
+  curl -fsSL "$REPO_BASE_URL/${SNAPSHOT_SOURCE_FILE:-n8n-server-snapshot.sh}" -o "$SNAPSHOT_BIN"
   chown root:root "$SNAPSHOT_BIN"
   chmod 0755 "$SNAPSHOT_BIN"
 

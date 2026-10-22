@@ -1,0 +1,251 @@
+type: update
+jpsVersion: '1.7.3'
+id: proxiblue-magento-services
+name: Magento Services
+description:
+  short: Hardening, self-healing and monitoring for the shared services
+    environment (MariaDB, Redis sessions, OpenSearch) plus n8n on its nginx
+    node, which watches the PHP box over SSH.
+
+baseUrl: https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/
+
+# Attaches to the nginx node (layer cp) of the services env; the data layers
+# (sqldb, nosqldb, es) are provisioned from here by node group.
+targetNodes:
+  nodeGroup: cp
+
+settings:
+  main:
+    fields:
+    - caption: PHP box internal IP
+      type: string
+      name: PHPBOX_HOST
+      required: false
+      description: AppServer node of the PHP environment. Leave blank until it
+        exists; set later via "Configure".
+    - caption: Magento DB user
+      type: string
+      name: DB_USER
+      required: true
+    - caption: Magento DB password
+      type: string
+      inputType: password
+      name: DB_PASS
+      required: true
+    - caption: Alert email
+      type: string
+      name: ALERT_EMAIL
+      required: true
+    - caption: Gemini API Key (n8n monitor workflow)
+      type: string
+      name: GEMINI_API_KEY
+      required: false
+    - caption: Monitor Workflow Schedule
+      type: list
+      values:
+          "0 */4 * * *": "Every 4 hours (default)"
+          "0 */6 * * *": "Every 6 hours"
+          "0 2 * * *": "Daily at 02:00"
+      required: true
+      name: MONITOR_SCHEDULE
+      value: "0 */4 * * *"
+    - caption: n8n UI IP Allowlist
+      type: text
+      name: N8N_ALLOWED_IPS
+      required: true
+      description: "Comma-separated CIDRs allowed to reach the n8n UI (e.g. '203.0.113.4/32, 198.51.100.0/24')."
+    - caption: n8n UI Port
+      type: list
+      values:
+          "8443": "8443 (default)"
+          "8080": "8080"
+      required: true
+      name: N8N_PORT
+      value: "8443"
+    - caption: OpenSearch version (only used if the env has no OpenSearch node yet)
+      type: list
+      values:
+          2.19.2-openjdk-11.0.25-almalinux-9 : 2.19.2 (Magento <= 2.4.8)
+          3.6.0-openjdk-21.0.2-almalinux-9 : 3.6.0 (Magento 2.4.9+)
+      required: true
+      name: OS_VERSION
+      value: 2.19.2-openjdk-11.0.25-almalinux-9
+    - caption: Config repo ref
+      type: string
+      name: REPO_REF
+      value: main
+      required: true
+
+onInstall:
+  - ensureNodes
+  - provisionData
+  - provisionCp
+
+# The nginx node is a dockerized stack too; re-provision if it is redeployed.
+onAfterRedeployContainer [cp]:
+  - provisionCp
+
+onUninstall:
+  - cmd [cp]: |-
+      systemctl disable --now n8n 2>/dev/null || true
+      sed -i '/check_magento_cron.sh/d' /var/spool/cron/root 2>/dev/null || true
+    user: root
+
+buttons:
+  - caption: Add missing Redis / OpenSearch nodes
+    confirmText: Add a Redis (sessions) and/or OpenSearch node if the environment has none?
+    loadingText: Adding nodes...
+    action: ensureNodes
+    successText: Done. Run "Re-apply configuration" next to provision the new node(s).
+  - caption: Re-apply configuration
+    confirmText: Re-run provisioning on all services nodes?
+    loadingText: Provisioning...
+    action: provisionAll
+    successText: Services re-provisioned. Log at /var/log/services-provision.log on each node.
+  - caption: Configure
+    settings: main
+    loadingText: Applying...
+    action: provisionCp
+    successText: Settings applied to the nginx/n8n node.
+  - caption: Show monitor SSH key
+    loadingText: Reading...
+    action: showMonitorKey
+  - caption: Update n8n
+    confirmText: Update the n8n npm package and restart the service?
+    loadingText: Updating n8n...
+    action: updateN8n
+    successText: n8n updated and restarted.
+
+actions:
+  provisionAll:
+    - provisionData
+    - provisionCp
+
+  # Which layers exist? Envs built by hand or from older manifests may lack
+  # the Redis / OpenSearch nodes (ehop: mysql8 + nginxphp + storage only).
+  detectNodes:
+    script: |
+      var r = api.env.control.GetEnvInfo('${env.envName}', session);
+      if (r.result != 0) return r;
+      var g = {};
+      for (var i = 0; i < r.nodes.length; i++) g[r.nodes[i].nodeGroup] = true;
+      return { result: 0, hasDb: !!g.sqldb, hasRedis: !!g.nosqldb, hasEs: !!g.es };
+
+  ensureNodes:
+    - detectNodes
+    - if ('${response.hasRedis}' != 'true'):
+        - log: adding Redis (sessions) node, layer nosqldb
+        - addNodes:
+            nodeType: redis
+            nodeGroup: nosqldb
+            displayName: Redis for Sessions
+            fixedCloudlets: 2
+            flexibleCloudlets: 28
+    - detectNodes
+    - if ('${response.hasEs}' != 'true'):
+        - log: adding OpenSearch node, layer es
+        - addNodes:
+            nodeType: docker
+            dockerName: jelastic/opensearch:${settings.OS_VERSION}
+            nodeGroup: es
+            displayName: OpenSearch
+            fixedCloudlets: 4
+            flexibleCloudlets: 28
+            dockerEnvVars:
+              DISABLE_INSTALL_DEMO_CONFIG: "true"
+              OPENSEARCH_JAVA_OPTS: "-Xms4g -Xmx4g"
+            dockerEntryPoint: ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+
+  provisionData:
+    - detectNodes
+    - if ('${response.hasDb}' == 'true'):
+        provisionDb
+    - detectNodes
+    - if ('${response.hasRedis}' == 'true'):
+        provisionRedis
+    - detectNodes
+    - if ('${response.hasEs}' == 'true'):
+        provisionEs
+
+  provisionDb:
+    - cmd [sqldb]: |-
+        export REPO_REF='${settings.REPO_REF:main}'
+        curl -fsSL "https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${settings.REPO_REF:main}/scripts/provision-services-data.sh" -o /root/provision-services-data.sh
+        chmod +x /root/provision-services-data.sh
+        bash /root/provision-services-data.sh db 2>&1 | tee -a /var/log/run.log
+      user: root
+      sayYes: true
+
+  provisionRedis:
+    - cmd [nosqldb]: |-
+        export REPO_REF='${settings.REPO_REF:main}'
+        curl -fsSL "https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${settings.REPO_REF:main}/scripts/provision-services-data.sh" -o /root/provision-services-data.sh
+        chmod +x /root/provision-services-data.sh
+        bash /root/provision-services-data.sh redis 2>&1 | tee -a /var/log/run.log
+      user: root
+      sayYes: true
+
+  provisionEs:
+    - cmd [es]: |-
+        export REPO_REF='${settings.REPO_REF:main}'
+        curl -fsSL "https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${settings.REPO_REF:main}/scripts/provision-services-data.sh" -o /root/provision-services-data.sh
+        chmod +x /root/provision-services-data.sh
+        bash /root/provision-services-data.sh es 2>&1 | tee -a /var/log/run.log
+      user: root
+      sayYes: true
+
+  provisionCp:
+    - cmd [cp]: |-
+        export PHPBOX_HOST='${settings.PHPBOX_HOST:}'
+        export DB_HOST='${nodes.sqldb.master.intIP}'
+        export REDIS_HOST='${nodes.nosqldb.master.intIP:}'
+        export ES_HOST='${nodes.es.first.intIP:}'
+        export DB_USER='${settings.DB_USER:}'
+        export DB_PASS='${settings.DB_PASS:}'
+        export ALERT_EMAIL='${settings.ALERT_EMAIL:}'
+        export GEMINI_API_KEY='${settings.GEMINI_API_KEY:}'
+        export MONITOR_SCHEDULE='${settings.MONITOR_SCHEDULE:0 */4 * * *}'
+        export N8N_DOMAIN='n8n.${env.domain}'
+        export N8N_PUBLIC_PORT='${settings.N8N_PORT:8443}'
+        export N8N_ALLOWED_IPS='${settings.N8N_ALLOWED_IPS:}'
+        export REPO_REF='${settings.REPO_REF:main}'
+        curl -fsSL "https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${settings.REPO_REF:main}/scripts/provision-services-cp.sh" -o /root/provision-services-cp.sh
+        chmod +x /root/provision-services-cp.sh
+        set -o pipefail
+        bash /root/provision-services-cp.sh 2>&1 | tee -a /var/log/run.log
+      user: root
+      sayYes: true
+
+  showMonitorKey:
+    - cmd [cp]: cat /var/lib/n8n/.ssh/id_ed25519.pub
+      user: root
+    - return:
+        type: success
+        message: |
+          Paste into the PHP box add-on ("Authorize monitor key"):
+
+          ```
+          ${response.responses.out}
+          ```
+
+  updateN8n:
+    - cmd [cp]: |-
+        curl -fsSL "https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${settings.REPO_REF:main}/configs/n8n/update_n8n.sh" | bash
+      user: root
+
+success:
+  text: |
+    ## Magento Services add-on installed
+
+    * **Nodes**: DB `${nodes.sqldb.master.intIP:}`, Redis sessions
+      `${nodes.nosqldb.master.intIP:}`, OpenSearch `${nodes.es.first.intIP:}`.
+      Enter these in the PHP box add-on. (Blank = layer missing; use
+      **Add missing Redis / OpenSearch nodes**, then **Re-apply**.)
+    * **Monitor SSH key**: use **Show monitor SSH key**, then **Authorize
+      monitor key** on the PHP box add-on.
+    * **n8n**: http://n8n.${env.domain}:${settings.N8N_PORT}/ (allowlisted
+      IPs only; create the owner account on first visit, then activate the
+      `Server Monitor` workflow). Env file `/etc/n8n/n8n.env`.
+    * **Magento cron check**: every 5 min from this node, config in
+      `/etc/magento-monitor.env`.
+    * Logs: `/var/log/services-provision.log` on each node.
