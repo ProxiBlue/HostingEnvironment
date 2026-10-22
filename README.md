@@ -37,8 +37,13 @@ therefore runs `ghcr.io/proxiblue/nginxphp`, built by
   moves `ghcr.io/proxiblue/nginxphp:8.4-almalinux-9`. Once Jelastic ships
   the patch itself, its image is mirrored unchanged.
 
-The manifest normally uses Jelastic's own image (`nodeType:
-nginxphp-dockerized`, tag in `PHP_VERSION`). When a security patch is out
+The manifest normally uses Jelastic's own image, pulled straight from Docker
+Hub (`nodeType: docker`, `image: jelastic/nginxphp:<PHP_VERSION>`).
+`nodeType: nginxphp-dockerized` with a `tag` is not used: when the hosting
+provider's stack catalog does not yet list the tag, Jelastic silently installs
+its default stack instead (8.5.11 when 1.30.6-php-8.4.27 was requested). The
+first install step, `checkPhpVersion`, aborts the install if the AppServer's
+PHP is not the version in `PHP_VERSION`. When a security patch is out
 and Jelastic has not published it, the ghcr image is the stopgap. It is not
 yet proven on a real Jelastic install: a node declared as a bare `image:`
 with the full ghcr reference as the setting value failed with "JPS manifest

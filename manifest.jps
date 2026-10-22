@@ -67,8 +67,11 @@ settings:
 skipNodeEmails: true
 
 nodes:
-- nodeType: nginxphp-dockerized
-  tag: ${settings.PHP_VERSION}
+# Pull the exact jelastic/nginxphp tag from Docker Hub, like the OpenSearch
+# node. nodeType: nginxphp-dockerized + tag silently falls back to the
+# provider's default stack (PHP 8.5.11) when its catalog lacks the tag.
+- nodeType: docker
+  image: jelastic/nginxphp:${settings.PHP_VERSION}
   count: 1
   cloudlets: 74
   extip: 1
@@ -115,6 +118,7 @@ nodes:
   entrypoint: ["/usr/bin/supervisord","-c","/etc/supervisord.conf"]
 
 onInstall:
+  - checkPhpVersion
   - setNodeDisplayName [cp]: AppServer
   - setNodeDisplayName [sqldb]: DataBase
   - createDb
@@ -136,6 +140,14 @@ onInstall:
       - nosqldb
 
 actions:
+  checkPhpVersion:
+  - log: Check AppServer PHP version
+  - cmd [cp]: |-
+      want=$(echo '${settings.PHP_VERSION}' | sed -E 's/.*-php-([0-9.]+)-.*/\1/')
+      have=$(php -r 'echo PHP_VERSION;')
+      echo "AppServer PHP $have, expected $want"
+      [ "$have" = "$want" ] || exit 1
+    user: root
   SetupAccess:
   - log: Set Access
   - cmd [cp]: |-
