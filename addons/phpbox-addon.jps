@@ -31,7 +31,7 @@ settings:
             required: false
             value: |-
               /data /var/www/webroot/ROOT/web/sites/default/files
-              ehop-uat-512365:/backups /BACKUPS
+              ehop-uat-512365:/backups /var/www/webroot/BACKUPS
               ehop-uat-512365:/data /UAT_FILES
             description: "One per line: <path on services storage node> <path on this box>; other env: <envName>:/path. Existing mount points are left alone."
         magento:

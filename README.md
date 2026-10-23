@@ -44,7 +44,7 @@ dialog closes. The Let's Encrypt add-on does the same for its certificate.
 | Site profile | `magento` or `drupal`: picks the nginx vhost, fail2ban jails, crons, health probe |
 | Services environment | dropdown of your envs; the add-on reads the `sqldb` (and `nosqldb`, `es` if present) node IPs from it via the API. Nothing is installed there. |
 | Document root | blank = `ROOT/pub` (magento) / `ROOT/web` (drupal) |
-| NFS mounts | shown per profile with prefilled defaults (drupal: `/data` → `ROOT/web/sites/default/files` + the UAT `/backups`, `/data`; magento: `/data` → `/var/www/webroot/nfs`, with `ROOT/pub/media` a symlink into it). One per line `<path on storage node> <path on this box>`, `<envName>:/path` for another env's storage. Created via the API, existing mount points untouched |
+| NFS mounts | shown per profile with prefilled defaults (drupal: `/data` → `ROOT/web/sites/default/files`, UAT `/backups` → `/var/www/webroot/BACKUPS`, UAT `/data` → `/UAT_FILES`; magento: `/data` → `/var/www/webroot/nfs`, with `ROOT/pub/media` a symlink into it). One per line `<path on storage node> <path on this box>`, `<envName>:/path` for another env's storage. Created via the API, existing mount points untouched. Seeds `/etc/phpbox-mounts.txt` once; after that edit the file on the box and press **Apply mounts** |
 | Behind Cloudflare | checkbox. nginx trusts `CF-Connecting-IP` from Cloudflare's published ranges (fetched at provision time into `conf.d/cloudflare-realip.conf`), so access logs and fail2ban see the visitor. Certificate: see below |
 | Alert / backup email | fail2ban, backup mail |
 | Monitor SSH public key | optional, from the Services add-on |

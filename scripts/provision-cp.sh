@@ -19,8 +19,9 @@
 #                    (n8n). Appended to nginx's authorized_keys.
 #   MOUNTS_DRUPAL / MOUNTS_MAGENTO
 #                    optional. NFS mount list for the profile, "src dst" per
-#                    line; written to /etc/phpbox-mounts.txt (kept across
-#                    redeploys). The add-on's mounts action reads that file.
+#                    line; seeds /etc/phpbox-mounts.txt once (kept across
+#                    redeploys, hand-editable). The add-on's mounts action
+#                    reads that file.
 #   CLOUDFLARE       true|false. Site is behind Cloudflare's proxy: nginx
 #                    trusts CF-Connecting-IP from Cloudflare's published
 #                    ranges (fail2ban / logs see the visitor). Default: false.
@@ -408,6 +409,13 @@ EOF
 # --- NFS mount list (consumed by the add-on's mounts action via the API) ----
 
 mounts_file() {
+  # Seeded once from the profile's setting; afterwards the file on the box is
+  # the source of truth (hand-edit, then "Apply mounts" / phpbox mounts). It
+  # is in redeploy.conf, so edits survive redeploys and re-provisions.
+  if [ -f "$MOUNTS_FILE" ]; then
+    log "mount list: keeping existing $MOUNTS_FILE ($(grep -c '^/\|^[^#].*:/' "$MOUNTS_FILE") entries)"
+    return 0
+  fi
   local list=""
   case "$SITE_PROFILE" in
     drupal)  list="$MOUNTS_DRUPAL" ;;
@@ -420,7 +428,7 @@ mounts_file() {
       echo "$list"
     } > "$MOUNTS_FILE"
     log "mount list written to $MOUNTS_FILE ($(grep -c '^/\|^[^#].*:/' "$MOUNTS_FILE") entries)"
-  elif [ ! -f "$MOUNTS_FILE" ]; then
+  else
     log "no mount list given and no $MOUNTS_FILE yet"
   fi
 }
