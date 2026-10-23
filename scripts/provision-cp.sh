@@ -104,9 +104,11 @@ EOF
 }
 
 apply_system_passwords() {
-  # /etc/shadow is reset by a redeploy; re-apply so SSH/web-SSH logins keep working.
-  echo "$SYSTEM_PASS" | passwd --stdin nginx >>"$LOG" 2>&1
-  echo "$SYSTEM_PASS" | passwd --stdin root  >>"$LOG" 2>&1
+  # /etc/shadow is reset by a redeploy; re-apply so SSH/web-SSH logins and
+  # "su root" from nginx keep working. chpasswd ships with shadow-utils
+  # (always present); passwd itself is not in every image.
+  printf 'root:%s\nnginx:%s\n' "$SYSTEM_PASS" "$SYSTEM_PASS" | chpasswd >>"$LOG" 2>&1 \
+    || die "chpasswd failed"
 }
 
 # --- packages --------------------------------------------------------------
@@ -124,7 +126,9 @@ install_packages() {
     curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - >>"$LOG" 2>&1
     yum install -y nodejs >>"$LOG" 2>&1
   fi
-  local want="joe pv monit libsodium httpd-tools goaccess libwebp-tools fail2ban unzip s-nail"
+  # iptables-nft: fail2ban's iptables-multiport action needs the iptables
+  # binary; the plain docker image has only nft.
+  local want="joe pv monit libsodium httpd-tools goaccess libwebp-tools fail2ban unzip s-nail redis passwd iptables-nft"
   local missing=""
   for p in $want; do rpm -q "$p" >/dev/null 2>&1 || missing="$missing $p"; done
   if [ -n "$missing" ]; then
@@ -205,12 +209,19 @@ nginx_config() {
 # --- local Redis (page/object cache, unix socket) --------------------------
 
 redis_local() {
-  fetch configs/redis/redis.conf /etc/redis.conf
+  # The plain docker node type does not honour REDIS_ENABLED (that is the
+  # nginxphp-dockerized stack's jem hook), so the server comes from AppStream
+  # (install_packages). EL9 unit reads /etc/redis/redis.conf.
+  local conf; conf="$(grep -oE '/etc/redis[^ ]*\.conf' /usr/lib/systemd/system/redis.service | head -1)"
+  : "${conf:=/etc/redis/redis.conf}"
+  mkdir -p "$(dirname "$conf")" /var/lib/redis /var/log/redis
+  fetch configs/redis/redis-local.conf "$conf"
+  chown redis:redis "$conf" /var/lib/redis /var/log/redis
   mkdir -p /etc/systemd/system/redis.service.d
   fetch configs/restart.conf /etc/systemd/system/redis.service.d/restart.conf
   systemctl daemon-reload
   systemctl enable redis >>"$LOG" 2>&1 || true
-  systemctl restart redis >>"$LOG" 2>&1
+  systemctl restart redis >>"$LOG" 2>&1 || die "redis failed to start, see $LOG and /var/log/redis/redis.log"
 }
 
 # --- hosts / environment ---------------------------------------------------
