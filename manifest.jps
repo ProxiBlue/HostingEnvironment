@@ -43,8 +43,8 @@ settings:
     type: text
     name: MOUNTS
     required: false
-    description: "One per line: <source path on storage node> <target path on this box>.
-      e.g. drupal: /data/files /var/www/webroot/ROOT/web/sites/default/files"
+    description: "One per line: <source path on the services storage node> <target path on this box>,
+      e.g. /data /var/www/webroot/ROOT/web/sites/default/files. Another env's storage: <envName>:/path /target"
   - caption: Alert / backup email
     type: string
     name: BACKUP_EMAIL
