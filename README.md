@@ -44,7 +44,7 @@ dialog closes. The Let's Encrypt add-on does the same for its certificate.
 | Site profile | `magento` or `drupal`: picks the nginx vhost, fail2ban jails, crons, health probe |
 | Services environment | dropdown of your envs; the add-on reads the `sqldb` (and `nosqldb`, `es` if present) node IPs from it via the API. Nothing is installed there. |
 | Document root | blank = `ROOT/pub` (magento) / `ROOT/web` (drupal) |
-| NFS mounts | one per line `<path on storage node> <path on this box>`; created via the API from the services env's `storage` node, existing mount points untouched |
+| NFS mounts | shown per profile with prefilled defaults (drupal: `/data` → `ROOT/web/sites/default/files` + the UAT `/backups`, `/data`; magento: `/data` → `ROOT/pub/media`). One per line `<path on storage node> <path on this box>`, `<envName>:/path` for another env's storage. Created via the API, existing mount points untouched |
 | Alert / backup email | fail2ban, backup mail |
 | Monitor SSH public key | optional, from the Services add-on |
 | Config repo ref | pin a commit sha while testing (raw.githubusercontent caches `main` ~5 min) |

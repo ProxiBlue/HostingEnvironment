@@ -23,6 +23,25 @@ settings:
         drupal: Drupal
       value: magento
       required: true
+      showIf:
+        drupal:
+          - caption: NFS mounts (drupal)
+            type: text
+            name: MOUNTS_DRUPAL
+            required: false
+            value: |-
+              /data /var/www/webroot/ROOT/web/sites/default/files
+              ehop-uat-512365:/backups /BACKUPS
+              ehop-uat-512365:/data /UAT_FILES
+            description: "One per line: <path on services storage node> <path on this box>; other env: <envName>:/path. Existing mount points are left alone."
+        magento:
+          - caption: NFS mounts (magento)
+            type: text
+            name: MOUNTS_MAGENTO
+            required: false
+            value: |-
+              /data /var/www/webroot/ROOT/pub/media
+            description: "One per line: <path on services storage node> <path on this box>; other env: <envName>:/path. Existing mount points are left alone."
     - caption: Services environment
       type: envlist
       name: SERVICES_ENV
@@ -36,14 +55,6 @@ settings:
       name: DOCROOT
       required: false
       description: "magento: /var/www/webroot/ROOT/pub, drupal: /var/www/webroot/ROOT/web"
-    - caption: NFS mounts from the services env storage node
-      type: text
-      name: MOUNTS
-      required: false
-      description: "One per line: <source path on the services storage node> <target path on this box>,
-        e.g. /data /var/www/webroot/ROOT/web/sites/default/files. Source from another
-        env's storage node: <envName>:/path, e.g. ehop-uat-512365:/backups /BACKUPS.
-        Existing mount points are left alone."
     - caption: Alert / backup email
       type: string
       name: BACKUP_EMAIL
@@ -103,7 +114,7 @@ buttons:
     action: authorizeMonitorKey
     successText: Key added to nginx's authorized_keys on the AppServer.
   - caption: Apply mounts
-    confirmText: Create any NFS mount points from the add-on's MOUNTS setting that do not exist yet?
+    confirmText: Create any NFS mount points from the add-on's mounts setting that do not exist yet?
     loadingText: Mounting...
     action: showMounts
   - caption: Show services IPs
@@ -154,7 +165,9 @@ actions:
     script: |
       // Lines: "<src> <dst>". src = path on the services env's storage node,
       // or "<otherEnv>:<path>" for a storage node in another env (e.g. UAT).
-      var raw = getParam('MOUNTS') || '', envName = '${env.envName}', svc = '${settings.SERVICES_ENV:}';
+      var profile = getParam('PROFILE') || 'magento';
+      var raw = getParam(profile == 'drupal' ? 'MOUNTS_DRUPAL' : 'MOUNTS_MAGENTO') || '';
+      var envName = '${env.envName}', svc = '${settings.SERVICES_ENV:}';
       var items = String(raw).split(/[\r\n;,]+/), wanted = [], i;
       for (i = 0; i < items.length; i++) {
         var p = items[i].replace(/^\s+|\s+$/g, '').split(/\s+/);
@@ -194,7 +207,9 @@ actions:
       }
       return { result: 0, out: out.join('; ') };
     params:
-      MOUNTS: ${settings.MOUNTS:}
+      PROFILE: ${settings.SITE_PROFILE:magento}
+      MOUNTS_DRUPAL: ${settings.MOUNTS_DRUPAL:}
+      MOUNTS_MAGENTO: ${settings.MOUNTS_MAGENTO:}
 
   showMounts:
     - mounts
