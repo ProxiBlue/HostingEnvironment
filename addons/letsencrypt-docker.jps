@@ -100,8 +100,10 @@ onInstall:
       webroot: ${settings.webroot:}
       webrootPath: ${settings.webrootPath:}
       fallbackToX1: ${settings.fallbackToX1:}
-      deployHook: ${settings.deployHook:}
-      deployHookType: ${settings.deployHookType:}
+      # docker node: the platform does not install the cert itself. The add-on
+      # fetches this script by URL and runs it as root after every issue/renew.
+      deployHook: https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/scripts/le-deploy-hook.sh
+      deployHookType: cmd
       undeployHook: ${settings.undeployHook:}
       undeployHookType: ${settings.undeployHookType:}
       test: ${settings.test:}

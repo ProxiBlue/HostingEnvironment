@@ -396,6 +396,7 @@ redeploy_conf() {
     /etc/nginx/conf.d/CORS/
     /var/spool/cron/root
     /var/lib/redis/
+    /var/lib/jelastic/SSL/
     "$MOUNTS_FILE"
   )
   for p in "${keep[@]}"; do
