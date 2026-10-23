@@ -58,9 +58,16 @@ Afterwards, on the AppServer (`su -`, password from `phpbox creds`):
    `RD_MASTER`, OpenSearch `ES_MASTER` when those layers exist. Local cache
    Redis: `/tmp/redis.sock`.
 3. Bind the domain, install **Let's Encrypt**: **Import** → **URL** →
-   `.../addons/letsencrypt-docker.jps` (the upstream manifest with
-   `targetNodes: nodeGroup: cp`; the Marketplace copy only lists stack node
-   types, so it hides itself from a docker-type node). Webroot = document root. `nossl.conf` serves `/.well-known/acme-challenge/`
+   `.../addons/letsencrypt-docker.jps`. It is the upstream manifest with
+   `targetNodes: nodeGroup: cp` (the Marketplace copy lists stack node types
+   only, so it hides itself from a docker-type node), the advanced fields
+   declared (external IP on, webroot on, path = document root) and a
+   `deployHook` (`scripts/le-deploy-hook.sh`): on a docker node the platform
+   does not install the issued cert, so the hook copies it to
+   `/var/lib/jelastic/SSL/jelastic.chain|key`, enables `ssl.conf` and
+   reloads nginx after every issue/renewal. The provisioner re-enables
+   `ssl.conf` after a redeploy. Blank domain = staging cert for the env
+   domain; **Configure** with the real domain once DNS points here. `nossl.conf` serves `/.well-known/acme-challenge/`
    from the document root. For a DNS swap-over, issue the cert after DNS
    points at the new box (or copy the old cert into `/var/lib/jelastic/SSL/`
    first and swap `ssl.conf.disabled` → `ssl.conf`).
@@ -79,8 +86,14 @@ exist).
    (`/var/log/phpbox-provision.log`, last line `... provisioned OK`).
 3. `php -v`, `curl -I https://domain/`, monit on `:2812`.
 
-Nothing else changes: IP, certificate, crontab, code, mounts. If the hook
-did not fire, press **Re-apply configuration** on the add-on.
+Nothing else changes: IP, certificate, crontab, code, mounts. Proven
+2026-10-23 on a Drupal box (`jelastic/nginxphp:1.30.6-php-8.4.27`): the
+hook fired, services/TLS/mounts all back without manual steps. If the hook
+ever does not fire, press **Re-apply configuration** or run
+`phpbox reapply`.
+
+`phpbox reapply <sha>` pins that sha as `REPO_REF` for later redeploys;
+pin a recent one so the redeploy run includes all current logic.
 
 `/etc/php.d/` survives the redeploy, which is why the provisioner regenerates
 it and drops any `extension=` line whose `.so` does not exist in the new
@@ -90,7 +103,13 @@ Jelastic publishes PHP patch images a few weeks after php.net. The
 `docker/nginxphp/` image + `.github/workflows/nginxphp-image.yml` rebuild PHP
 from source on the newest Jelastic base and publish
 `ghcr.io/proxiblue/nginxphp:<tag>`; add ghcr as a custom registry in the
-Redeploy dialog to use it. Not yet proven on a real redeploy.
+Redeploy dialog to use it. The ghcr path is not yet proven on a real redeploy
+(the Docker Hub tag path is).
+
+Image facts that shaped the provisioner (plain `docker` node type, not the
+`nginxphp-dockerized` stack): no redis server, `passwd`, `iptables`, `jem`
+or `mailx` in the image; `REDIS_ENABLED` is ignored; `stub_status.conf`
+listens on `127.0.0.1:80`, so loopback curl tests hit it, not the site.
 
 ## Services add-on (optional)
 
