@@ -36,6 +36,26 @@ mixins:
 
 settings:
   fields:
+    # The Marketplace adds the "advanced" fields (external IP, webroot, path)
+    # from its own metadata; an Import->URL install only shows what is in the
+    # manifest, so they are declared here with the defaults this box needs.
+    - type: checkbox
+      name: withExtIp
+      caption: Use external IP (the AppServer's public IP)
+      value: true
+    - type: checkbox
+      name: webroot
+      caption: Webroot verification (challenge served from the document root)
+      value: true
+    - type: string
+      name: webrootPath
+      caption: Webroot path (= document root)
+      value: /var/www/webroot/ROOT/web
+      required: true
+    - type: checkbox
+      name: fallbackToX1
+      caption: Fallback to Let's Encrypt X1 chain
+      value: false
     - type: string
       name: customDomains
       vtype: domainlist
