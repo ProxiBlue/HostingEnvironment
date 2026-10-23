@@ -7,10 +7,14 @@
 #
 # Inputs (env vars). Values are persisted to /etc/phpbox.env (kept across
 # redeploys via redeploy.conf) so later runs can omit them.
-#   DB_HOST          internal IP of the services-env MariaDB node   (required once)
-#   REDIS_HOST       internal IP of the services-env Redis node     (required once)
-#   ES_HOST          internal IP of the services-env OpenSearch node(required once)
-#   BACKUP_EMAIL     alerts + backup failure mail                    (required once)
+#   SITE_PROFILE     magento | drupal. Picks nginx vhost, fail2ban jails,
+#                    crons and the health probe. Default: magento.
+#   DOCROOT          nginx document root. Default by profile:
+#                    magento /var/www/webroot/ROOT/pub, drupal /var/www/webroot/ROOT/web
+#   DB_HOST          internal IP of the services-env DB node          (required once)
+#   REDIS_HOST       internal IP of the services-env Redis node       (optional)
+#   ES_HOST          internal IP of the services-env OpenSearch node  (optional)
+#   BACKUP_EMAIL     alerts + backup failure mail                     (required once)
 #   MONITOR_SSH_KEY  optional. ssh public key of the services-node monitor
 #                    (n8n). Appended to nginx's authorized_keys.
 #   REPO_REF         git ref of ProxiBlue/HostingEnvironment to pull
@@ -22,6 +26,7 @@ CREDS_FILE=/root/phpbox-credentials.txt
 LOG=/var/log/phpbox-provision.log
 REDEPLOY_CONF=/etc/jelastic/redeploy.conf
 SNAPSHOT_BIN=/usr/local/bin/n8n-server-snapshot.sh
+VHOST=/etc/nginx/conf.d/SITES_ENABLED/site-default.conf
 
 log() { echo "[provision-cp] $*" | tee -a "$LOG"; }
 die() { echo "[provision-cp] FATAL: $*" | tee -a "$LOG" >&2; exit 1; }
@@ -32,7 +37,7 @@ touch "$LOG"
 # --- inputs ----------------------------------------------------------------
 
 load_env() {
-  # Explicit env wins; anything unset falls back to the persisted file.
+  # Explicit (non-empty) env wins; anything unset falls back to the persisted file.
   if [ -f "$ENV_FILE" ]; then
     while IFS='=' read -r k v; do
       [ -z "$k" ] && continue
@@ -42,8 +47,16 @@ load_env() {
     done < "$ENV_FILE"
   fi
   : "${REPO_REF:=main}"
+  : "${SITE_PROFILE:=magento}"
   : "${MONITOR_SSH_KEY:=}"
-  for v in DB_HOST REDIS_HOST ES_HOST BACKUP_EMAIL; do
+  : "${REDIS_HOST:=}"
+  : "${ES_HOST:=}"
+  case "$SITE_PROFILE" in
+    magento) : "${DOCROOT:=/var/www/webroot/ROOT/pub}" ;;
+    drupal)  : "${DOCROOT:=/var/www/webroot/ROOT/web}" ;;
+    *) die "SITE_PROFILE must be magento or drupal (got '$SITE_PROFILE')" ;;
+  esac
+  for v in DB_HOST BACKUP_EMAIL; do
     [ -n "${!v:-}" ] || die "$v not set and not in $ENV_FILE"
   done
   REPO_BASE="https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${REPO_REF}"
@@ -53,6 +66,8 @@ persist_env() {
   umask 077
   cat > "$ENV_FILE" <<EOF
 # Written by provision-cp.sh. Edit, then re-run the add-on's "Re-apply".
+SITE_PROFILE="$SITE_PROFILE"
+DOCROOT="$DOCROOT"
 DB_HOST="$DB_HOST"
 REDIS_HOST="$REDIS_HOST"
 ES_HOST="$ES_HOST"
@@ -159,6 +174,7 @@ php_config() {
 nginx_config() {
   fetch configs/nginx/nginx.conf        /etc/nginx/nginx.conf
   fetch configs/nginx/nossl.conf        /etc/nginx/conf.d/nossl.conf
+  sed -i "s|__DOCROOT__|$DOCROOT|g" /etc/nginx/conf.d/nossl.conf
   fetch configs/nginx/stub_status.conf  /etc/nginx/conf.d/stub_status.conf
   # Let's Encrypt add-on owns ssl.conf once installed; never overwrite it.
   if [ ! -f /etc/nginx/conf.d/ssl.conf ]; then
@@ -166,8 +182,13 @@ nginx_config() {
   fi
   mkdir -p /etc/nginx/conf.d/SITES_ENABLED /etc/nginx/conf.d/CORS
   # Per-site vhost is customised in place after install - seed only once.
-  if [ ! -f /etc/nginx/conf.d/SITES_ENABLED/site-default.conf ]; then
-    fetch configs/nginx/site-default-mg2.conf /etc/nginx/conf.d/SITES_ENABLED/site-default.conf
+  if [ ! -f "$VHOST" ]; then
+    case "$SITE_PROFILE" in
+      magento) fetch configs/nginx/site-default-mg2.conf    "$VHOST" ;;
+      drupal)  fetch configs/nginx/site-default-drupal.conf "$VHOST" ;;
+    esac
+    sed -i "s|__DOCROOT__|$DOCROOT|g" "$VHOST"
+    log "seeded $SITE_PROFILE vhost, docroot $DOCROOT"
   fi
   if [ ! -f /etc/nginx/conf.d/CORS/cors.conf ]; then
     fetch configs/nginx/CORS-CDN/cors.conf /etc/nginx/conf.d/CORS/cors.conf
@@ -181,7 +202,7 @@ nginx_config() {
   nginx -t >>"$LOG" 2>&1 || die "nginx -t failed, see $LOG"
 }
 
-# --- local Redis (Magento cache, unix socket) -------------------------------
+# --- local Redis (page/object cache, unix socket) --------------------------
 
 redis_local() {
   fetch configs/redis/redis.conf /etc/redis.conf
@@ -201,16 +222,24 @@ set_host() { # set_host NAME IP
 
 hosts_and_env() {
   set_host DB_MASTER "$DB_HOST"
-  set_host RD_MASTER "$REDIS_HOST"
-  set_host ES_MASTER "$ES_HOST"
+  [ -n "$REDIS_HOST" ] && set_host RD_MASTER "$REDIS_HOST"
+  [ -n "$ES_HOST" ]    && set_host ES_MASTER "$ES_HOST"
   sed -i '/^export BACKUP_FAIL_/d' /etc/environment
   {
     echo "export BACKUP_FAIL_FROM=$BACKUP_EMAIL"
     echo "export BACKUP_FAIL_TO=$BACKUP_EMAIL"
   } >> /etc/environment
+  return 0
 }
 
 # --- fail2ban --------------------------------------------------------------
+
+fail2ban_jails() {
+  case "$SITE_PROFILE" in
+    drupal) echo "nginx-badurls nginx-drupal-login" ;;
+    *)      echo "nginx-badurls nginx-search nginx-magento-admin" ;;
+  esac
+}
 
 fail2ban_config() {
   cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
@@ -219,7 +248,7 @@ fail2ban_config() {
   sed -i "s/sender = root@<fq-hostname>/sender = $BACKUP_EMAIL/g" /etc/fail2ban/jail.local
   sed -i "s/destemail = root@localhost/destemail = $BACKUP_EMAIL/g" /etc/fail2ban/jail.local
   sed -i 's/action = %(action_)s/action = %(action_mwl)s/g' /etc/fail2ban/jail.local
-  for f in nginx-badurls nginx-search nginx-magento-admin; do
+  for f in $(fail2ban_jails); do
     fetch "configs/fail2ban/filter.d/$f.conf" "/etc/fail2ban/filter.d/$f.conf"
     fetch "configs/fail2ban/jail.d/$f.conf"   "/etc/fail2ban/jail.d/$f.conf"
   done
@@ -246,7 +275,8 @@ monit_config() {
 # --- logrotate / cron ------------------------------------------------------
 
 logrotate_config() {
-  fetch configs/logrotate/magento-stack /etc/logrotate.d/magento-stack
+  fetch configs/logrotate/magento-stack /etc/logrotate.d/php-stack
+  rm -f /etc/logrotate.d/magento-stack
 }
 
 cron_line() { # cron_line USER 'line'  (append if absent)
@@ -260,9 +290,11 @@ cron_line() { # cron_line USER 'line'  (append if absent)
 crons() {
   cron_line root  "0 5 * * * /bin/bash /root/fail2banUpdate.sh >/var/log/fail2ban-update.log 2>&1"
   # /var/spool/cron/nginx survives redeploys; these only seed a fresh box.
-  cron_line nginx "0 5 * * * /bin/bash /var/www/webroot/ROOT/backup/backup_to_s3.sh media 2>&1 >/var/www/webroot/ROOT/var/log/backups.log"
-  cron_line nginx "5 8 * * 0 rm -rf /var/www/webroot/ROOT/pub/media/import/* 2>&1 >/dev/null"
   cron_line nginx "0 1 * * * zcat /var/log/nginx/access*.gz | grep -v -f /var/www/webroot/ROOT/go_access_exclude_list.txt | goaccess -o /var/www/webroot/site_report/index.html --log-format=COMBINED - 2>&1 >/dev/null"
+  if [ "$SITE_PROFILE" = magento ]; then
+    cron_line nginx "0 5 * * * /bin/bash /var/www/webroot/ROOT/backup/backup_to_s3.sh media 2>&1 >/var/www/webroot/ROOT/var/log/backups.log"
+    cron_line nginx "5 8 * * 0 rm -rf /var/www/webroot/ROOT/pub/media/import/* 2>&1 >/dev/null"
+  fi
 }
 
 # --- remote monitoring hooks (services node -> this box) -------------------
@@ -321,15 +353,18 @@ verify() {
   for s in nginx php-fpm redis monit fail2ban; do
     systemctl is-active --quiet "$s" || { log "VERIFY: $s not active"; ok=0; }
   done
-  local code; code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1/health_check.php || true)"
-  log "VERIFY: /health_check.php -> HTTP $code"
+  local probe=/
+  [ "$SITE_PROFILE" = magento ] && probe=/health_check.php
+  local code; code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1$probe" || true)"
+  log "VERIFY: $probe -> HTTP $code (no code deployed yet = 404/403, fine)"
+  log "VERIFY: DB_MASTER tcp 3306 -> $(timeout 5 bash -c "</dev/tcp/$DB_HOST/3306" 2>/dev/null && echo open || echo CLOSED)"
   [ "$ok" -eq 1 ] || die "verification failed"
-  log "PHP $(php -r 'echo PHP_VERSION;') / $(nginx -v 2>&1) provisioned OK"
+  log "PHP $(php -r 'echo PHP_VERSION;') / $(nginx -v 2>&1) / profile $SITE_PROFILE provisioned OK"
 }
 
 main() {
   load_env
-  log "start (REPO_REF=$REPO_REF, DB=$DB_HOST, REDIS=$REDIS_HOST, ES=$ES_HOST)"
+  log "start (profile=$SITE_PROFILE, docroot=$DOCROOT, REPO_REF=$REPO_REF, DB=$DB_HOST, REDIS=${REDIS_HOST:--}, ES=${ES_HOST:--})"
   persist_env
   ensure_secrets
   apply_system_passwords

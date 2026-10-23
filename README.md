@@ -1,15 +1,16 @@
-# Magento 2 Hosting Environment for Jelastic / Virtuozzo Application Platform
+# PHP Hosting Environment for Jelastic / Virtuozzo Application Platform
 
 Two environments, two add-ons. The PHP box is disposable; the services are not.
+Site profiles: **Magento 2 / Mage-OS** and **Drupal**.
 
 ```
-┌─ PHP environment ───────────────┐     ┌─ Services environment ("Resource Server") ─┐
+┌─ PHP environment ───────────────┐     ┌─ Services environment ───────────────────────┐
 │ AppServer  (cp, docker          │     │ nginx node  (cp)   n8n, cron health check    │
-│   jelastic/nginxphp:<tag>)      │────▶│ MariaDB     (sqldb)                          │
-│   nginx, php-fpm, local redis   │     │ Redis       (nosqldb)  sessions              │
-│   fail2ban, monit, goaccess     │◀────│ OpenSearch  (es)                             │
-│   add-on: Magento PHP Box       │ ssh │ NFS         (storage)  media                 │
-└─────────────────────────────────┘     │ add-on: Magento Services                     │
+│   jelastic/nginxphp:<tag>)      │────▶│ DB          (sqldb)  MariaDB / MySQL 8       │
+│   nginx, php-fpm, local redis   │     │ Redis       (nosqldb)  sessions   (optional) │
+│   fail2ban, monit, goaccess     │◀────│ OpenSearch  (es)                  (optional) │
+│   add-on: ProxiBlue PHP Box     │ ssh │ NFS         (storage)  media / files         │
+└─────────────────────────────────┘     │ add-on: ProxiBlue Services        (optional) │
                                         └──────────────────────────────────────────────┘
 ```
 
@@ -23,68 +24,60 @@ Two environments, two add-ons. The PHP box is disposable; the services are not.
 
 A PHP update used to mean a new environment: slow, and the external IP changed.
 Now PHP is updated in place with the dashboard's **Redeploy Containers** dialog.
-Redeploy keeps the volumes (`/var/www/webroot/ROOT`, `/var/www/webroot/nfs`) and
-the paths in `/etc/jelastic/redeploy.conf` (`/etc/php.d/`, `/etc/php-fpm.conf`,
-`/var/spool/cron/nginx`, `/var/lib/nginx/.ssh/`) and wipes everything else:
-`/etc/nginx`, yum packages, root cron, `/etc/hosts`, monit, fail2ban.
+Redeploy keeps the volumes (`/var/www/webroot/ROOT`, `/var/www/webroot/nfs`),
+the mount points, and the paths in `/etc/jelastic/redeploy.conf` (`/etc/php.d/`,
+`/etc/php-fpm.conf`, `/var/spool/cron/nginx`, `/var/lib/nginx/.ssh/`) and wipes
+everything else: `/etc/nginx`, yum packages, root cron, `/etc/hosts`, monit,
+fail2ban.
 
 The PHP Box add-on hooks `onAfterRedeployContainer` and re-runs
 `scripts/provision-cp.sh`, so the box is fully configured again before the
 dialog closes. The Let's Encrypt add-on does the same for its certificate.
 
-## Install order
+## Building a PHP box
 
-### 1. Services environment
+**Import** → **URL** → `.../<ref>/manifest.jps`. Fields:
 
-Already exists (`lcd-live`). Apply the add-on once:
+| Field | Meaning |
+|-------|---------|
+| PHP Version | `jelastic/nginxphp` tag |
+| Site profile | `magento` or `drupal`: picks the nginx vhost, fail2ban jails, crons, health probe |
+| Services environment | dropdown of your envs; the add-on reads the `sqldb` (and `nosqldb`, `es` if present) node IPs from it via the API. Nothing is installed there. |
+| Document root | blank = `ROOT/pub` (magento) / `ROOT/web` (drupal) |
+| Alert / backup email | fail2ban, backup mail |
+| Monitor SSH public key | optional, from the Services add-on |
+| Config repo ref | pin a commit sha while testing (raw.githubusercontent caches `main` ~5 min) |
 
-1. Dashboard → **Import** → **URL** →
-   `https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/addons/services-addon.jps`
-2. Pick the services environment. Fill: Magento DB user/password, alert
-   email, n8n allowlist/port, Gemini key (optional). Leave *PHP box internal
-   IP* blank if the PHP env does not exist yet.
-3. Success text lists the internal IPs of DB / Redis / OpenSearch - needed
-   for step 2.
-4. Add-ons tab on the nginx node → **Show monitor SSH key** → copy.
+Afterwards, on the AppServer:
 
-Environments that lack a Redis or OpenSearch layer (ehop: nginxphp + mysql8 +
-storage only) get them created by the add-on (`addNodes`, layers `nosqldb` /
-`es`, OpenSearch version chosen in the dialog). Data provisioning skips
-layers that do not exist. MySQL 8 and MariaDB are both handled.
+1. **Mount Points** → mount the services env's storage node at the path the
+   site expects (survives redeploys: it is env config, not container content).
+2. Deploy code to `/var/www/webroot/ROOT`. DB host in the site config:
+   `DB_MASTER` (`/etc/hosts`, re-written on every provision). Redis sessions
+   `RD_MASTER`, OpenSearch `ES_MASTER` when those layers exist. Local cache
+   Redis: `/tmp/redis.sock`.
+3. Bind the domain, install the **Let's Encrypt** add-on on the `cp` layer
+   (webroot = document root). `nossl.conf` serves `/.well-known/acme-challenge/`
+   from the document root. For a DNS swap-over, issue the cert after DNS
+   points at the new box (or copy the old cert into `/var/lib/jelastic/SSL/`
+   first and swap `ssl.conf.disabled` → `ssl.conf`).
 
-What it does: MariaDB/MySQL hardening + `check_mariadb.sh`, Redis config +
-`check_redis_sessions.sh`, OpenSearch plugins/config + `check_opensearch.sh`
-(each node only restarts if its config actually changed), n8n with the
-`Server Monitor` workflow on the nginx node, Magento cron health check from
-the nginx node (DB is local; `cron:run` kicked on the PHP box over SSH).
-
-### 2. PHP environment
-
-New env: **Import** → **URL** → `.../main/manifest.jps`. Pick PHP tag, enter
-the three services IPs, alert email, paste the monitor key.
-
-Existing env (e.g. `newphplive`): **Import** → **URL** →
-`.../main/addons/phpbox-addon.jps`, pick the env, same fields. Test on a
-**clone** first - the provisioner rewrites `/etc/nginx/nginx.conf`,
-`/etc/php.d/*`, fail2ban and monit (it never touches
+Existing PHP env: **Import** → **URL** → `.../addons/phpbox-addon.jps`, pick
+the env + `cp` layer, same fields. Test on a **clone** first - the
+provisioner rewrites `/etc/nginx/nginx.conf`, `/etc/php.d/*`, fail2ban and
+monit, and generates **new root/nginx system passwords** (it never touches
 `conf.d/SITES_ENABLED/`, `conf.d/CORS/`, `ssl.conf` or `.htpasswd` once they
 exist).
 
-Then: bind domain, deploy code, install the **Let's Encrypt** add-on on the
-`cp` layer (webroot on, path `/var/www/webroot/ROOT/pub`, fallback to X1 on).
-`nossl.conf` serves `/.well-known/acme-challenge/` for the webroot check.
-
-Back on the services add-on: **Configure** → set *PHP box internal IP* so the
-remote snapshot and cron kick know where to go.
-
-## Updating PHP
+### Updating PHP
 
 1. PHP env → AppServer layer → **Redeploy Containers** → choose tag → confirm.
 2. Wait for the add-on's `onAfterRedeployContainer` to finish
-   (`/var/log/phpbox-provision.log`, last line `provisioned OK`).
-3. `php -v`, `curl -I https://domain/`, check monit on `:2812`.
+   (`/var/log/phpbox-provision.log`, last line `... provisioned OK`).
+3. `php -v`, `curl -I https://domain/`, monit on `:2812`.
 
-Nothing else changes: IP, certificate, crontab, code, media.
+Nothing else changes: IP, certificate, crontab, code, mounts. If the hook
+did not fire, press **Re-apply configuration** on the add-on.
 
 `/etc/php.d/` survives the redeploy, which is why the provisioner regenerates
 it and drops any `extension=` line whose `.so` does not exist in the new
@@ -96,69 +89,79 @@ from source on the newest Jelastic base and publish
 `ghcr.io/proxiblue/nginxphp:<tag>`; add ghcr as a custom registry in the
 Redeploy dialog to use it. Not yet proven on a real redeploy.
 
-## Add-on buttons
+## Services add-on (optional)
 
-**Magento PHP Box** (PHP env, `cp` layer)
+**Import** → **URL** → `.../addons/services-addon.jps`, pick the services env
++ its nginx (`cp`) layer. Installs n8n + the Server Monitor workflow on that
+node, which snapshots the local DB/Redis/OpenSearch over the internal network
+and the PHP box over SSH. Safe on a live env: data nodes are **not touched**
+unless *Harden data nodes* is ticked (the DB restarts once when the my.cnf
+block is appended).
+
+| Field | Meaning |
+|-------|---------|
+| PHP box environment | dropdown; the add-on resolves its `cp` node IP. Blank until it exists, then **Configure**. |
+| DB user / password | only for the Magento `cron_schedule` health check. Blank = no check (Drupal). |
+| Harden data nodes | my.cnf hardening + restart, Redis/OpenSearch config, health-check crons every 2 min |
+
+Buttons: **Configure** (edit settings, re-apply to the nginx node), **Add
+Redis / OpenSearch nodes** (opt-in checkboxes), **Harden data nodes**, **Show
+monitor SSH key** (paste into the PHP box add-on's **Authorize monitor
+key**), **Update n8n**.
+
+## PHP Box add-on buttons
 
 | Button | Does |
 |--------|------|
-| Re-apply configuration | Re-runs `provision-cp.sh` with the stored settings |
-| Update fail2ban filters | Pulls filters/jails from the repo, restarts fail2ban |
+| Re-apply configuration | Re-runs `provision-cp.sh` (re-resolves the services IPs first) |
+| Update fail2ban filters | Pulls filters/jails for the profile from the repo, restarts fail2ban |
 | Authorize monitor key | Adds a public key to `nginx`'s `authorized_keys` |
-| Show credentials | Prints `/root/phpbox-credentials.txt` (system, stats, monit passwords) |
-
-**Magento Services** (services env, `cp` layer)
-
-| Button | Does |
-|--------|------|
-| Add missing Redis / OpenSearch nodes | `addNodes` for absent `nosqldb` / `es` layers |
-| Re-apply configuration | Re-provisions all nodes |
-| Configure | Edit settings (PHP box IP, DB creds, n8n, schedule) and re-apply to the nginx node |
-| Show monitor SSH key | Prints the key to authorise on the PHP box |
-| Update n8n | `npm install -g n8n@latest` + restart |
-
-Pin **Config repo ref** to a commit sha while testing: raw.githubusercontent
-caches `main` for ~5 minutes after a push.
+| Show services IPs | What the dropdown currently resolves to |
+| Show credentials | `/root/phpbox-credentials.txt` (system, stats, monit passwords) + `/etc/phpbox.env` |
 
 ## What lives where
 
 **PHP box** - everything that must see the local kernel, sockets or logs:
-nginx + php-fpm (`configs/nginx`, `configs/php`), local Redis for Magento
-cache on `/tmp/redis.sock`, fail2ban (`nginx-badurls`, `nginx-search`,
-`nginx-magento-admin`, auto-updated daily), monit (nginx, php-fpm, redis;
-port 2812), logrotate, GoAccess daily report at `/site_report` (basic auth
-`stats`), S3 media backup cron, Node.js 22 (Hyva/Tailwind), AWS CLI v2,
+nginx + php-fpm (`configs/nginx`, `configs/php`), local Redis on
+`/tmp/redis.sock`, fail2ban (`nginx-badurls` always; magento:
+`nginx-search`, `nginx-magento-admin`; drupal: `nginx-drupal-login`; refreshed
+daily), monit (nginx, php-fpm, redis; port 2812), logrotate, GoAccess daily
+report at `/site_report` (basic auth `stats`), Node.js 22, AWS CLI v2,
 `n8n-server-snapshot.sh` (read-only collector the services node calls over
-SSH as `nginx` via a one-line sudoers rule).
+SSH as `nginx` via a one-line sudoers rule). Magento only: S3 media backup
+cron, weekly `pub/media/import` purge.
 
 **Services nginx node** - n8n (`configs/n8n/`, SQLite, nginx-proxied on the
-chosen port behind an IP allowlist), `n8n-services-snapshot.sh` (local
-DB/Redis/OpenSearch health + the PHP box snapshot over SSH, same path as the
-local collector so the shipped workflow is unchanged),
-`check_magento_cron.sh` every 5 min, config in `/etc/magento-monitor.env`.
+chosen port behind an IP allowlist), `n8n-services-snapshot.sh`,
+`check_magento_cron.sh` every 5 min when DB creds given, config in
+`/etc/magento-monitor.env`.
 
-**Data nodes** - healthcheck cron every 2 min, restart after 3 failures
-(`configs/healthchecks/`), logrotate, hardening (`skip-symbolic-links`,
-`local-infile=0`, phpMyAdmin denied; OpenSearch security plugin off, single
-node, `analysis-icu` + `analysis-phonetic` for ElasticSuite).
+**Data nodes** (only after *Harden data nodes*) - healthcheck cron every 2
+min, restart after 3 failures (`configs/healthchecks/`), logrotate, hardening
+(`skip-symbolic-links`, `local-infile=0`, phpMyAdmin denied; OpenSearch
+security plugin off, single node, `analysis-icu` + `analysis-phonetic`).
 
-Persisted state on the PHP box across redeploys (added to `redeploy.conf` by
-the provisioner): `/etc/phpbox.env`, `/root/phpbox-credentials.txt`,
+Persisted on the PHP box across redeploys (added to `redeploy.conf` by the
+provisioner): `/etc/phpbox.env`, `/root/phpbox-credentials.txt`,
 `/root/.ssh/`, `/etc/nginx/.htpasswd`, `/etc/nginx/conf.d/SITES_ENABLED/`,
 `/etc/nginx/conf.d/CORS/`, `/var/spool/cron/root`, `/var/lib/redis/`.
 
 ## Security notes
 
 - PHP: `expose_php=Off`, `allow_url_include=Off`, `open_basedir` limited to
-  the Magento root, `/tmp`, the composer cache and the PHP binary path,
-  `disable_functions=passthru` (`proc_open`/`popen` stay: Composer and
-  `setup:di:compile` need them), secure session cookies,
-  `request_terminate_timeout=600s`, slowlog at 30s.
-- nginx: rate limits on admin (30r/s), customer login (2r/s), REST/GraphQL
-  (10r/s); 50 connections per IP; security headers; PHP execution only for
-  `index.php`, `get.php`, `static.php`, `health_check.php`, error handlers;
-  dotfiles and `.php` under `media/` denied; php-fpm status/ping localhost
-  only; static assets immutable for a year.
+  `/var/www/webroot`, `/tmp`, the composer cache and the PHP binary path,
+  `disable_functions=passthru` (`proc_open`/`popen` stay: Composer needs
+  them), secure session cookies, `request_terminate_timeout=600s`, slowlog
+  at 30s.
+- nginx (magento): rate limits on admin (30r/s), customer login (2r/s),
+  REST/GraphQL (10r/s); PHP execution only for `index.php`, `get.php`,
+  `static.php`, `health_check.php`, error handlers; dotfiles and `.php` under
+  `media/` denied.
+- nginx (drupal): `/user/login|password|register` at 2r/s; `.php` under
+  `sites/*/files`, `vendor/`, private dirs and dotfiles denied; `update.php`
+  allowed (Drupal's own access check applies).
+- Both: 50 connections per IP, security headers, php-fpm status/ping
+  localhost only, static assets immutable for a year.
 - MariaDB 12.x needs `patches/composer/allow-mariadb-12.patch` in the Magento
   project (adds `^12\.` to the SqlVersionProvider DI config).
 
@@ -168,11 +171,12 @@ PHP box:
 
 ```bash
 tail -3 /var/log/phpbox-provision.log           # last line: "... provisioned OK"
-php -i | grep -E 'disable_functions|open_basedir' # passthru only; composer cache + /usr/lib64/jelastic_php present
+cat /etc/phpbox.env; grep MASTER /etc/hosts
+php -i | grep -E 'disable_functions|open_basedir'
 php -r 'echo 1;' 2>&1 | head -1                   # no startup warnings
-curl -s -o /dev/null -w '%{http_code}\n' https://DOMAIN/media/customer/test.php   # 403
 systemctl is-active nginx php-fpm redis monit fail2ban
-cat /etc/jelastic/redeploy.conf | sed -n '/CUSTOM/,/SYSTEM/p'
+fail2ban-client status
+sed -n '/CUSTOM/,/SYSTEM/p' /etc/jelastic/redeploy.conf
 ```
 
 Services nginx node:
@@ -184,18 +188,14 @@ sudo -u n8n ssh -i /var/lib/n8n/.ssh/id_ed25519 -o BatchMode=yes nginx@PHPBOX tr
 sudo /usr/local/bin/n8n-server-snapshot.sh | head -40
 ```
 
-Data nodes: `/var/log/mysql/healthcheck.log`, `/var/log/redis_healthcheck.log`,
-`/var/log/opensearch/healthcheck.log`; `opensearch-plugin list` shows
-`analysis-icu` and `analysis-phonetic`.
-
 ## Cron summary
 
 | Node | Job | Schedule |
 |------|-----|----------|
 | PHP box (root) | `fail2banUpdate.sh` | daily 05:00 |
-| PHP box (nginx) | S3 media backup | daily 05:00 |
 | PHP box (nginx) | GoAccess report | daily 01:00 |
-| PHP box (nginx) | clear `pub/media/import` | Sunday 08:05 |
-| Services nginx | `check_magento_cron.sh` | every 5 min |
+| PHP box (nginx, magento) | S3 media backup | daily 05:00 |
+| PHP box (nginx, magento) | clear `pub/media/import` | Sunday 08:05 |
+| Services nginx | `check_magento_cron.sh` (if DB creds) | every 5 min |
 | Services nginx | n8n Server Monitor workflow | setting (default every 4 h) |
-| sqldb / nosqldb / es | service health check | every 2 min |
+| sqldb / nosqldb / es (if hardened) | service health check | every 2 min |

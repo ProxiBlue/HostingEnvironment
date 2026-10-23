@@ -3,7 +3,7 @@
 # nginx node (Resource Server "AppServer", nodeGroup cp). Hosts:
 #   - n8n (self-hosted) with the Server Monitor workflow, snapshotting the
 #     local services AND the PHP box over ssh,
-#   - the Magento cron health check (DB is local to this env),
+#   - the Magento cron health check (only when DB_USER/DB_PASS given),
 #   - the ssh identity (user n8n) the PHP box must authorise.
 #
 # Run by addons/services-addon.jps on install, after a redeploy of this node,
@@ -45,9 +45,12 @@ load_env() {
   : "${N8N_DOMAIN:=$(hostname -f)}"
   : "${REDIS_HOST:=}"
   : "${ES_HOST:=}"
-  for v in DB_HOST DB_USER DB_PASS ALERT_EMAIL; do
+  : "${DB_USER:=}"
+  : "${DB_PASS:=}"
+  for v in DB_HOST ALERT_EMAIL; do
     [ -n "${!v:-}" ] || die "$v not set and not in $ENV_FILE"
   done
+  [ -n "$DB_USER" ] || log "no DB_USER: Magento cron health check disabled"
   [ -n "$REDIS_HOST" ] || log "WARNING: no Redis node in this env yet (REDIS_HOST empty)"
   [ -n "$ES_HOST" ]    || log "WARNING: no OpenSearch node in this env yet (ES_HOST empty)"
   REPO_BASE="https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${REPO_REF}"
@@ -132,9 +135,14 @@ monitor_ssh_key() {
 }
 
 magento_cron_check() {
+  touch /var/spool/cron/root
+  if [ -z "$DB_USER" ]; then
+    sed -i '/check_magento_cron.sh/d' /var/spool/cron/root
+    chmod 0600 /var/spool/cron/root
+    return 0
+  fi
   fetch configs/healthchecks/check_magento_cron.sh /root/check_magento_cron.sh
   chmod +x /root/check_magento_cron.sh
-  touch /var/spool/cron/root
   grep -qF 'check_magento_cron.sh' /var/spool/cron/root \
     || echo "*/5 * * * * /bin/bash /root/check_magento_cron.sh" >> /var/spool/cron/root
   chmod 0600 /var/spool/cron/root
@@ -142,7 +150,8 @@ magento_cron_check() {
 
 verify() {
   systemctl is-active --quiet n8n || die "n8n not active"
-  log "VERIFY: mysql ping -> $(mysqladmin -h "$DB_HOST" -u"$DB_USER" -p"$DB_PASS" ping 2>&1 | tail -1)"
+  log "VERIFY: DB_MASTER tcp 3306 -> $(timeout 5 bash -c "</dev/tcp/$DB_HOST/3306" 2>/dev/null && echo open || echo CLOSED)"
+  [ -n "$DB_USER" ] && log "VERIFY: mysql ping -> $(mysqladmin -h "$DB_HOST" -u"$DB_USER" -p"$DB_PASS" ping 2>&1 | tail -1)"
   [ -n "$REDIS_HOST" ] && log "VERIFY: redis ping -> $(redis-cli -h "$REDIS_HOST" ping 2>&1 | tail -1)"
   [ -n "$ES_HOST" ]    && log "VERIFY: opensearch -> HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://$ES_HOST:9200/_cluster/health" || true)"
   if [ -n "$PHPBOX_HOST" ]; then

@@ -1,11 +1,11 @@
 jpsType: install
 jpsVersion: '1.7.3'
-name: Magento PHP Box (AppServer only)
+name: ProxiBlue PHP Box (AppServer only)
 description:
-  short: Single nginx/php-fpm node for Magento 2. DB, sessions Redis and
-    OpenSearch live in a separate services environment. All box
-    configuration comes from the "Magento PHP Box" add-on, which re-applies
-    itself after every container redeploy.
+  short: Single nginx/php-fpm node for a Magento 2 or Drupal site. DB (and
+    optionally Redis / OpenSearch) live in a separate services environment,
+    picked from a dropdown. All box configuration comes from the "ProxiBlue
+    PHP Box" add-on, which re-applies itself after every container redeploy.
 
 baseUrl: https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/
 
@@ -18,18 +18,27 @@ settings:
     required: true
     name: PHP_VERSION
     value: 1.30.6-php-8.4.27-almalinux-9
-  - caption: Services env - MariaDB internal IP
-    type: string
-    name: DB_HOST
+  - caption: Site profile
+    type: list
+    name: SITE_PROFILE
+    values:
+      magento: Magento 2 / Mage-OS
+      drupal: Drupal
+    value: magento
     required: true
-  - caption: Services env - Redis (sessions) internal IP
-    type: string
-    name: REDIS_HOST
+  - caption: Services environment
+    type: envlist
+    name: SERVICES_ENV
+    valueField: shortdomain
+    disableInactive: true
     required: true
-  - caption: Services env - OpenSearch internal IP
+    description: Environment holding the DB node (layer sqldb). Redis
+      (nosqldb) and OpenSearch (es) are picked up too if present.
+  - caption: Document root (blank = profile default)
     type: string
-    name: ES_HOST
-    required: true
+    name: DOCROOT
+    required: false
+    description: "magento: /var/www/webroot/ROOT/pub, drupal: /var/www/webroot/ROOT/web"
   - caption: Alert / backup email
     type: string
     name: BACKUP_EMAIL
@@ -69,9 +78,9 @@ onInstall:
       jps: ${baseUrl}addons/phpbox-addon.jps
       nodeGroup: cp
       settings:
-        DB_HOST: ${settings.DB_HOST}
-        REDIS_HOST: ${settings.REDIS_HOST}
-        ES_HOST: ${settings.ES_HOST}
+        SITE_PROFILE: ${settings.SITE_PROFILE}
+        SERVICES_ENV: ${settings.SERVICES_ENV}
+        DOCROOT: ${settings.DOCROOT:}
         BACKUP_EMAIL: ${settings.BACKUP_EMAIL}
         MONITOR_SSH_KEY: ${settings.MONITOR_SSH_KEY:}
         REPO_REF: ${settings.REPO_REF}
@@ -88,11 +97,13 @@ actions:
 
 success:
   text: |
-    ## AppServer created
+    ## AppServer created (${settings.SITE_PROFILE})
 
     Configuration, credentials and the self-healing bits are managed by the
-    **Magento PHP Box** add-on (Add-ons tab on the AppServer layer). Use its
-    **Show credentials** button for passwords.
+    **ProxiBlue PHP Box** add-on (Add-ons tab on the AppServer layer). Use its
+    **Show credentials** button for passwords and **Show services IPs** for
+    the DB / Redis / OpenSearch addresses it resolved from `${settings.SERVICES_ENV}`.
 
-    Next: bind the domain, deploy code to `/var/www/webroot/ROOT`, install the
-    Let's Encrypt add-on on this layer (webroot `/var/www/webroot/ROOT/pub`).
+    Next: mount the services env's storage (Mount Points on the AppServer),
+    deploy code to `/var/www/webroot/ROOT`, bind the domain, install the
+    Let's Encrypt add-on on this layer.

@@ -1,10 +1,11 @@
 type: update
 jpsVersion: '1.7.3'
-id: proxiblue-magento-phpbox
-name: Magento PHP Box
+id: proxiblue-phpbox
+name: ProxiBlue PHP Box
 description:
-  short: Configures the AppServer (nginx/php-fpm) node for Magento 2 and
-    re-applies itself after every container redeploy (PHP version change).
+  short: Configures the AppServer (nginx/php-fpm) node for a Magento or Drupal
+    site whose DB (and optionally Redis / OpenSearch) live in another
+    environment, and re-applies itself after every container redeploy.
 
 baseUrl: https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/
 
@@ -14,18 +15,27 @@ targetNodes:
 settings:
   main:
     fields:
-    - caption: Services env - MariaDB internal IP
-      type: string
-      name: DB_HOST
+    - caption: Site profile
+      type: list
+      name: SITE_PROFILE
+      values:
+        magento: Magento 2 / Mage-OS
+        drupal: Drupal
+      value: magento
       required: true
-    - caption: Services env - Redis (sessions) internal IP
-      type: string
-      name: REDIS_HOST
+    - caption: Services environment
+      type: envlist
+      name: SERVICES_ENV
+      valueField: shortdomain
+      disableInactive: true
       required: true
-    - caption: Services env - OpenSearch internal IP
+      description: Environment holding the DB node (layer sqldb). Redis
+        (nosqldb) and OpenSearch (es) are picked up too if that env has them.
+    - caption: Document root (blank = profile default)
       type: string
-      name: ES_HOST
-      required: true
+      name: DOCROOT
+      required: false
+      description: "magento: /var/www/webroot/ROOT/pub, drupal: /var/www/webroot/ROOT/web"
     - caption: Alert / backup email
       type: string
       name: BACKUP_EMAIL
@@ -50,9 +60,6 @@ settings:
       type: text
       name: MONITOR_SSH_KEY
       required: true
-
-globals:
-  provisionUrl: ${baseUrl}scripts/provision-cp.sh
 
 onInstall:
   - provision
@@ -84,16 +91,38 @@ buttons:
     loadingText: Adding key...
     action: authorizeMonitorKey
     successText: Key added to nginx's authorized_keys on the AppServer.
+  - caption: Show services IPs
+    loadingText: Resolving...
+    action: showServices
   - caption: Show credentials
     loadingText: Reading...
     action: showCredentials
 
 actions:
+  # Internal IPs of the DB / Redis / OpenSearch nodes in the selected services
+  # env. Master node of each layer; blank when the layer does not exist.
+  resolveServices:
+    script: |
+      var name = '${settings.SERVICES_ENV:}';
+      if (!name) return { result: 0, dbIp: '', redisIp: '', esIp: '', note: 'no services env selected' };
+      var r = api.env.control.GetEnvInfo(name, session);
+      if (r.result != 0) return r;
+      var ip = { sqldb: '', nosqldb: '', es: '' };
+      for (var i = 0; i < r.nodes.length; i++) {
+        var n = r.nodes[i];
+        if (!(n.nodeGroup in ip)) continue;
+        if (!ip[n.nodeGroup] || n.ismaster) ip[n.nodeGroup] = n.intIP;
+      }
+      return { result: 0, dbIp: ip.sqldb, redisIp: ip.nosqldb, esIp: ip.es, note: name };
+
   provision:
+    - resolveServices
     - cmd [cp]: |-
-        export DB_HOST='${settings.DB_HOST:}'
-        export REDIS_HOST='${settings.REDIS_HOST:}'
-        export ES_HOST='${settings.ES_HOST:}'
+        export SITE_PROFILE='${settings.SITE_PROFILE:magento}'
+        export DOCROOT='${settings.DOCROOT:}'
+        export DB_HOST='${response.dbIp}'
+        export REDIS_HOST='${response.redisIp}'
+        export ES_HOST='${response.esIp}'
         export BACKUP_EMAIL='${settings.BACKUP_EMAIL:}'
         export MONITOR_SSH_KEY='${settings.MONITOR_SSH_KEY:}'
         export REPO_REF='${settings.REPO_REF:main}'
@@ -117,9 +146,20 @@ actions:
         grep -qF -- "$key" "$ak" || echo "$key" >> "$ak"
       user: root
 
+  showServices:
+    - resolveServices
+    - return:
+        type: success
+        message: |
+          Services env `${response.note}`: DB `${response.dbIp}`, Redis
+          `${response.redisIp}`, OpenSearch `${response.esIp}`
+          (blank = that layer does not exist there).
+
   showCredentials:
     - cmd [cp]: |-
         cat /root/phpbox-credentials.txt
+        echo
+        cat /etc/phpbox.env
         echo
         echo "Monit: http://$(hostname -I | awk '{print $1}'):2812  user admin"
         echo "GoAccess: BASE_URL/site_report  user stats"
@@ -133,15 +173,15 @@ actions:
 
 success:
   text: |
-    ## Magento PHP Box add-on installed
+    ## ProxiBlue PHP Box add-on installed (${settings.SITE_PROFILE})
 
     * Credentials: **Show credentials** button on the add-on (also in
       `/root/phpbox-credentials.txt` on the AppServer).
-    * Services: DB `DB_MASTER` (${settings.DB_HOST}), sessions Redis
-      `RD_MASTER` (${settings.REDIS_HOST}), OpenSearch `ES_MASTER`
-      (${settings.ES_HOST}). Local cache Redis on socket `/tmp/redis.sock`.
+    * Services env `${settings.SERVICES_ENV}`: hosts entries `DB_MASTER`
+      (+ `RD_MASTER` / `ES_MASTER` where those layers exist). **Show services
+      IPs** lists them. Local cache Redis on socket `/tmp/redis.sock`.
     * PHP update: **Redeploy Containers** on the AppServer, pick the new tag.
       The add-on re-provisions automatically afterwards.
-    * SSL: install the Let's Encrypt add-on on this layer (webroot
-      `/var/www/webroot/ROOT/pub`).
+    * SSL: install the Let's Encrypt add-on on this layer (webroot = the
+      document root).
     * Log: `/var/log/phpbox-provision.log`

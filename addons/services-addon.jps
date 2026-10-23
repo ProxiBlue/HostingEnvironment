@@ -1,11 +1,12 @@
 type: update
 jpsVersion: '1.7.3'
-id: proxiblue-magento-services
-name: Magento Services
+id: proxiblue-services
+name: ProxiBlue Services
 description:
-  short: Hardening, self-healing and monitoring for the shared services
-    environment (MariaDB, Redis sessions, OpenSearch) plus n8n on its nginx
-    node, which watches the PHP box over SSH.
+  short: Monitoring (n8n) and optional hardening / self-healing for a shared
+    services environment (DB, Redis sessions, OpenSearch). Installs on the
+    env's nginx node and watches the PHP box over SSH. Nothing on the data
+    nodes is touched unless the matching option is ticked.
 
 baseUrl: https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/main/
 
@@ -17,25 +18,29 @@ targetNodes:
 settings:
   main:
     fields:
-    - caption: PHP box internal IP
-      type: string
-      name: PHPBOX_HOST
+    - caption: PHP box environment
+      type: envlist
+      name: PHPBOX_ENV
+      valueField: shortdomain
+      disableInactive: false
       required: false
-      description: AppServer node of the PHP environment. Leave blank until it
-        exists; set later via "Configure".
-    - caption: Magento DB user
-      type: string
-      name: DB_USER
-      required: true
-    - caption: Magento DB password
-      type: string
-      inputType: password
-      name: DB_PASS
-      required: true
+      description: Environment whose AppServer (layer cp) serves the site.
+        Leave empty until it exists; set later via "Configure".
     - caption: Alert email
       type: string
       name: ALERT_EMAIL
       required: true
+    - caption: Magento cron check - DB user (blank = no cron check)
+      type: string
+      name: DB_USER
+      required: false
+      description: Only used by the Magento cron health check (reads
+        cron_schedule from this env's DB). Drupal sites leave both blank.
+    - caption: Magento cron check - DB password
+      type: string
+      inputType: password
+      name: DB_PASS
+      required: false
     - caption: Gemini API Key (n8n monitor workflow)
       type: string
       name: GEMINI_API_KEY
@@ -62,7 +67,27 @@ settings:
       required: true
       name: N8N_PORT
       value: "8443"
-    - caption: OpenSearch version (only used if the env has no OpenSearch node yet)
+    - caption: Harden data nodes (DB my.cnf + restart, Redis/OpenSearch config, health-check crons)
+      type: checkbox
+      name: HARDEN_DATA
+      value: false
+      description: "Live env: leave OFF. Appending the my.cnf block restarts the DB."
+    - caption: Config repo ref
+      type: string
+      name: REPO_REF
+      value: main
+      required: true
+  addNodes:
+    fields:
+    - caption: Add Redis (sessions) node, layer nosqldb
+      type: checkbox
+      name: ADD_REDIS
+      value: false
+    - caption: Add OpenSearch node, layer es
+      type: checkbox
+      name: ADD_ES
+      value: false
+    - caption: OpenSearch version
       type: list
       values:
           2.19.2-openjdk-11.0.25-almalinux-9 : 2.19.2 (Magento <= 2.4.8)
@@ -70,15 +95,10 @@ settings:
       required: true
       name: OS_VERSION
       value: 2.19.2-openjdk-11.0.25-almalinux-9
-    - caption: Config repo ref
-      type: string
-      name: REPO_REF
-      value: main
-      required: true
 
 onInstall:
-  - ensureNodes
-  - provisionData
+  - if ('${settings.HARDEN_DATA:false}' == 'true'):
+      provisionData
   - provisionCp
 
 # The nginx node is a dockerized stack too; re-provision if it is redeployed.
@@ -92,21 +112,21 @@ onUninstall:
     user: root
 
 buttons:
-  - caption: Add missing Redis / OpenSearch nodes
-    confirmText: Add a Redis (sessions) and/or OpenSearch node if the environment has none?
-    loadingText: Adding nodes...
-    action: ensureNodes
-    successText: Done. Run "Re-apply configuration" next to provision the new node(s).
-  - caption: Re-apply configuration
-    confirmText: Re-run provisioning on all services nodes?
-    loadingText: Provisioning...
-    action: provisionAll
-    successText: Services re-provisioned. Log at /var/log/services-provision.log on each node.
   - caption: Configure
     settings: main
     loadingText: Applying...
     action: provisionCp
     successText: Settings applied to the nginx/n8n node.
+  - caption: Add Redis / OpenSearch nodes
+    settings: addNodes
+    loadingText: Adding nodes...
+    action: addDataNodes
+    successText: Done. Run "Harden data nodes" to provision the new node(s).
+  - caption: Harden data nodes
+    confirmText: Apply hardening + health-check crons to DB / Redis / OpenSearch nodes? The DB restarts if its my.cnf block is missing.
+    loadingText: Provisioning...
+    action: provisionData
+    successText: Data nodes provisioned. Log at /var/log/services-provision.log on each node.
   - caption: Show monitor SSH key
     loadingText: Reading...
     action: showMonitorKey
@@ -117,12 +137,7 @@ buttons:
     successText: n8n updated and restarted.
 
 actions:
-  provisionAll:
-    - provisionData
-    - provisionCp
-
-  # Which layers exist? Envs built by hand or from older manifests may lack
-  # the Redis / OpenSearch nodes (ehop: mysql8 + nginxphp + storage only).
+  # Which layers exist in this env.
   detectNodes:
     script: |
       var r = api.env.control.GetEnvInfo('${env.envName}', session);
@@ -131,9 +146,23 @@ actions:
       for (var i = 0; i < r.nodes.length; i++) g[r.nodes[i].nodeGroup] = true;
       return { result: 0, hasDb: !!g.sqldb, hasRedis: !!g.nosqldb, hasEs: !!g.es };
 
-  ensureNodes:
+  # Internal IP of the PHP box's AppServer (layer cp) in the selected env.
+  resolvePhpBox:
+    script: |
+      var name = '${settings.PHPBOX_ENV:}';
+      if (!name) return { result: 0, phpboxIp: '' };
+      var r = api.env.control.GetEnvInfo(name, session);
+      if (r.result != 0) return r;
+      var ip = '';
+      for (var i = 0; i < r.nodes.length; i++) {
+        var n = r.nodes[i];
+        if (n.nodeGroup == 'cp' && (!ip || n.ismaster)) ip = n.intIP;
+      }
+      return { result: 0, phpboxIp: ip };
+
+  addDataNodes:
     - detectNodes
-    - if ('${response.hasRedis}' != 'true'):
+    - if ('${settings.ADD_REDIS:false}' == 'true' && '${response.hasRedis}' != 'true'):
         - log: adding Redis (sessions) node, layer nosqldb
         - addNodes:
             nodeType: redis
@@ -142,7 +171,7 @@ actions:
             fixedCloudlets: 2
             flexibleCloudlets: 28
     - detectNodes
-    - if ('${response.hasEs}' != 'true'):
+    - if ('${settings.ADD_ES:false}' == 'true' && '${response.hasEs}' != 'true'):
         - log: adding OpenSearch node, layer es
         - addNodes:
             nodeType: docker
@@ -195,8 +224,9 @@ actions:
       sayYes: true
 
   provisionCp:
+    - resolvePhpBox
     - cmd [cp]: |-
-        export PHPBOX_HOST='${settings.PHPBOX_HOST:}'
+        export PHPBOX_HOST='${response.phpboxIp}'
         export DB_HOST='${nodes.sqldb.master.intIP}'
         export REDIS_HOST='${nodes.nosqldb.master.intIP:}'
         export ES_HOST='${nodes.es.first.intIP:}'
@@ -235,17 +265,15 @@ actions:
 
 success:
   text: |
-    ## Magento Services add-on installed
+    ## ProxiBlue Services add-on installed
 
     * **Nodes**: DB `${nodes.sqldb.master.intIP:}`, Redis sessions
       `${nodes.nosqldb.master.intIP:}`, OpenSearch `${nodes.es.first.intIP:}`.
-      Enter these in the PHP box add-on. (Blank = layer missing; use
-      **Add missing Redis / OpenSearch nodes**, then **Re-apply**.)
-    * **Monitor SSH key**: use **Show monitor SSH key**, then **Authorize
+      The PHP box add-on resolves these itself from the env dropdown.
+    * **Monitor SSH key**: **Show monitor SSH key**, then **Authorize
       monitor key** on the PHP box add-on.
     * **n8n**: http://n8n.${env.domain}:${settings.N8N_PORT}/ (allowlisted
       IPs only; create the owner account on first visit, then activate the
       `Server Monitor` workflow). Env file `/etc/n8n/n8n.env`.
-    * **Magento cron check**: every 5 min from this node, config in
-      `/etc/magento-monitor.env`.
+    * Data nodes untouched unless "Harden data nodes" was ticked / pressed.
     * Logs: `/var/log/services-provision.log` on each node.
