@@ -91,7 +91,7 @@ set_host() {
 install_packages() {
   rpm -q epel-release >/dev/null 2>&1 || yum install -y epel-release >>"$LOG" 2>&1
   local missing=""
-  for p in mariadb redis mailx curl; do
+  for p in mariadb redis s-nail curl; do
     rpm -q "$p" >/dev/null 2>&1 || command -v "$p" >/dev/null 2>&1 || missing="$missing $p"
   done
   if [ -n "$missing" ]; then

@@ -124,7 +124,7 @@ install_packages() {
     curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - >>"$LOG" 2>&1
     yum install -y nodejs >>"$LOG" 2>&1
   fi
-  local want="joe pv monit libsodium httpd-tools goaccess libwebp-tools fail2ban unzip mailx"
+  local want="joe pv monit libsodium httpd-tools goaccess libwebp-tools fail2ban unzip s-nail"
   local missing=""
   for p in $want; do rpm -q "$p" >/dev/null 2>&1 || missing="$missing $p"; done
   if [ -n "$missing" ]; then
