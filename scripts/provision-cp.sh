@@ -148,7 +148,7 @@ install_packages() {
   fi
   # iptables-nft: fail2ban's iptables-multiport action needs the iptables
   # binary; the plain docker image has only nft.
-  local want="joe pv monit libsodium httpd-tools goaccess libwebp-tools fail2ban unzip s-nail redis passwd iptables-nft"
+  local want="joe pv monit libsodium httpd-tools goaccess libwebp-tools fail2ban unzip s-nail redis passwd iptables-nft sqlite"
   local missing=""
   for p in $want; do rpm -q "$p" >/dev/null 2>&1 || missing="$missing $p"; done
   if [ -n "$missing" ]; then
