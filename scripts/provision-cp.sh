@@ -213,6 +213,25 @@ nginx_config() {
   nginx -t >>"$LOG" 2>&1 || die "nginx -t failed, see $LOG"
 }
 
+# --- TLS: enable ssl.conf when a certificate is present --------------------
+
+ssl_enable() {
+  # The Let's Encrypt add-on (or a manual upload) puts the certificate in
+  # /var/lib/jelastic/SSL/. On stack nodes "jem ssl" switches ssl.conf on; on
+  # this plain docker node nothing does, and a redeploy wipes /etc/nginx anyway.
+  local ssl=/etc/nginx/conf.d/ssl.conf
+  if [ ! -s /var/lib/jelastic/SSL/jelastic.chain ] || [ ! -s /var/lib/jelastic/SSL/jelastic.key ]; then
+    log "ssl: no certificate in /var/lib/jelastic/SSL yet, https stays off"
+    return 0
+  fi
+  if [ -f "$ssl" ] && grep -qE '^\s*listen\s+.*443' "$ssl"; then
+    return 0   # already an active TLS server (ours or the add-on's)
+  fi
+  fetch configs/nginx/ssl.conf.disabled "$ssl"
+  nginx -t >>"$LOG" 2>&1 || { log "ssl: nginx -t failed with ssl.conf, disabling"; mv "$ssl" "$ssl.disabled"; return 0; }
+  log "ssl: enabled $ssl (certificate found)"
+}
+
 # --- local Redis (page/object cache, unix socket) --------------------------
 
 redis_local() {
@@ -418,6 +437,7 @@ main() {
   install_awscli
   php_config
   nginx_config
+  ssl_enable
   redis_local
   hosts_and_env
   fail2ban_config

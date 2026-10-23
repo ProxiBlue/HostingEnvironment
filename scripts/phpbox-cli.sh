@@ -35,6 +35,13 @@ c_status() {
   printf '  DB_MASTER  %-16s tcp/3306 %s\n' "${DB_HOST:-}" "$( [ -n "${DB_HOST:-}" ] && (timeout 3 bash -c "</dev/tcp/$DB_HOST/3306" 2>/dev/null && echo open || echo CLOSED) )"
   [ -n "${REDIS_HOST:-}" ] && printf '  RD_MASTER  %-16s %s\n' "$REDIS_HOST" "$(redis-cli -h "$REDIS_HOST" ping 2>&1 | tail -1)"
   [ -n "${ES_HOST:-}" ]    && printf '  ES_MASTER  %-16s HTTP %s\n' "$ES_HOST" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$ES_HOST:9200/" || true)"
+  echo "== tls"
+  if [ -s /var/lib/jelastic/SSL/jelastic.chain ]; then
+    printf '  cert: %s\n' "$(openssl x509 -in /var/lib/jelastic/SSL/jelastic.chain -noout -subject -enddate 2>/dev/null | tr '\n' ' ')"
+  else
+    echo "  cert: none in /var/lib/jelastic/SSL"
+  fi
+  echo "  443: $(ss -tln 2>/dev/null | grep -q ':443 ' && echo listening || echo not listening)"
   echo "== mounts"
   mount | grep -E ' /var/www/' | awk '{print "  "$1" -> "$3" ("$5")"}' || true
   echo "== fail2ban"
