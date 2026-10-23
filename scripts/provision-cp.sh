@@ -330,6 +330,13 @@ EOF
   fi
 }
 
+# --- terminal front-end ----------------------------------------------------
+
+install_cli() {
+  fetch scripts/phpbox-cli.sh /usr/local/bin/phpbox
+  chmod 0755 /usr/local/bin/phpbox
+}
+
 # --- redeploy.conf: keep what the hook cannot regenerate --------------------
 
 redeploy_conf() {
@@ -370,7 +377,7 @@ verify() {
   log "VERIFY: $probe -> HTTP $code (no code deployed yet = 404/403, fine)"
   log "VERIFY: DB_MASTER tcp 3306 -> $(timeout 5 bash -c "</dev/tcp/$DB_HOST/3306" 2>/dev/null && echo open || echo CLOSED)"
   [ "$ok" -eq 1 ] || die "verification failed"
-  log "PHP $(php -r 'echo PHP_VERSION;') / $(nginx -v 2>&1) / profile $SITE_PROFILE provisioned OK"
+  log "PHP $(php -r 'echo PHP_VERSION;') / $(nginx -v 2>&1) / profile $SITE_PROFILE provisioned OK (terminal: phpbox status)"
 }
 
 main() {
@@ -390,6 +397,7 @@ main() {
   logrotate_config
   crons
   monitor_access
+  install_cli
   redeploy_conf
   restart_services
   verify

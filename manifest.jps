@@ -39,6 +39,12 @@ settings:
     name: DOCROOT
     required: false
     description: "magento: /var/www/webroot/ROOT/pub, drupal: /var/www/webroot/ROOT/web"
+  - caption: NFS mounts from the services env storage node
+    type: text
+    name: MOUNTS
+    required: false
+    description: "One per line: <source path on storage node> <target path on this box>.
+      e.g. drupal: /data/files /var/www/webroot/ROOT/web/sites/default/files"
   - caption: Alert / backup email
     type: string
     name: BACKUP_EMAIL
@@ -81,6 +87,7 @@ onInstall:
         SITE_PROFILE: ${settings.SITE_PROFILE}
         SERVICES_ENV: ${settings.SERVICES_ENV}
         DOCROOT: ${settings.DOCROOT:}
+        MOUNTS: ${settings.MOUNTS:}
         BACKUP_EMAIL: ${settings.BACKUP_EMAIL}
         MONITOR_SSH_KEY: ${settings.MONITOR_SSH_KEY:}
         REPO_REF: ${settings.REPO_REF}
@@ -104,6 +111,8 @@ success:
     **Show credentials** button for passwords and **Show services IPs** for
     the DB / Redis / OpenSearch addresses it resolved from `${settings.SERVICES_ENV}`.
 
-    Next: mount the services env's storage (Mount Points on the AppServer),
-    deploy code to `/var/www/webroot/ROOT`, bind the domain, install the
-    Let's Encrypt add-on on this layer.
+    Terminal: `su -` on the AppServer, then `phpbox status` / `phpbox creds`.
+
+    Next: deploy code to `/var/www/webroot/ROOT`, bind the domain, install
+    Let's Encrypt via Import → URL → `.../addons/letsencrypt-docker.jps`
+    (the Marketplace copy hides itself from docker-type nodes).

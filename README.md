@@ -44,20 +44,23 @@ dialog closes. The Let's Encrypt add-on does the same for its certificate.
 | Site profile | `magento` or `drupal`: picks the nginx vhost, fail2ban jails, crons, health probe |
 | Services environment | dropdown of your envs; the add-on reads the `sqldb` (and `nosqldb`, `es` if present) node IPs from it via the API. Nothing is installed there. |
 | Document root | blank = `ROOT/pub` (magento) / `ROOT/web` (drupal) |
+| NFS mounts | one per line `<path on storage node> <path on this box>`; created via the API from the services env's `storage` node, existing mount points untouched |
 | Alert / backup email | fail2ban, backup mail |
 | Monitor SSH public key | optional, from the Services add-on |
 | Config repo ref | pin a commit sha while testing (raw.githubusercontent caches `main` ~5 min) |
 
-Afterwards, on the AppServer:
+Afterwards, on the AppServer (`su -`, password from `phpbox creds`):
 
-1. **Mount Points** → mount the services env's storage node at the path the
-   site expects (survives redeploys: it is env config, not container content).
+1. `phpbox status` - services, versions, DB reachability, mounts, last
+   provision result. Mount points are env config and survive redeploys.
 2. Deploy code to `/var/www/webroot/ROOT`. DB host in the site config:
    `DB_MASTER` (`/etc/hosts`, re-written on every provision). Redis sessions
    `RD_MASTER`, OpenSearch `ES_MASTER` when those layers exist. Local cache
    Redis: `/tmp/redis.sock`.
-3. Bind the domain, install the **Let's Encrypt** add-on on the `cp` layer
-   (webroot = document root). `nossl.conf` serves `/.well-known/acme-challenge/`
+3. Bind the domain, install **Let's Encrypt**: **Import** → **URL** →
+   `.../addons/letsencrypt-docker.jps` (the upstream manifest with
+   `targetNodes: nodeGroup: cp`; the Marketplace copy only lists stack node
+   types, so it hides itself from a docker-type node). Webroot = document root. `nossl.conf` serves `/.well-known/acme-challenge/`
    from the document root. For a DNS swap-over, issue the cert after DNS
    points at the new box (or copy the old cert into `/var/lib/jelastic/SSL/`
    first and swap `ssl.conf.disabled` → `ssl.conf`).
@@ -109,11 +112,26 @@ Redis / OpenSearch nodes** (opt-in checkboxes), **Harden data nodes**, **Show
 monitor SSH key** (paste into the PHP box add-on's **Authorize monitor
 key**), **Update n8n**.
 
-## PHP Box add-on buttons
+## PHP Box: terminal and buttons
+
+`/usr/local/bin/phpbox` on the AppServer (root):
+
+| Command | Does |
+|---------|------|
+| `phpbox status` | services, versions, redis ping, DB tcp check, mounts, fail2ban jails, last provision result |
+| `phpbox creds` | system / stats / monit passwords |
+| `phpbox env` | `/etc/phpbox.env` + `*_MASTER` hosts entries |
+| `phpbox reapply [ref]` | re-run the provisioner (from a git ref if given) |
+| `phpbox fail2ban-update` | refresh filters/jails |
+| `phpbox authorize-key 'ssh-ed25519 ...'` | allow the services monitor in as `nginx` |
+| `phpbox log [n]` | provision log tail |
+
+Add-on buttons (same actions, plus the ones that need the platform API):
 
 | Button | Does |
 |--------|------|
 | Re-apply configuration | Re-runs `provision-cp.sh` (re-resolves the services IPs first) |
+| Apply mounts | Creates missing NFS mount points from the MOUNTS setting |
 | Update fail2ban filters | Pulls filters/jails for the profile from the repo, restarts fail2ban |
 | Authorize monitor key | Adds a public key to `nginx`'s `authorized_keys` |
 | Show services IPs | What the dropdown currently resolves to |

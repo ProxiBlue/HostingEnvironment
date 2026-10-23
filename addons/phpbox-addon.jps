@@ -36,6 +36,14 @@ settings:
       name: DOCROOT
       required: false
       description: "magento: /var/www/webroot/ROOT/pub, drupal: /var/www/webroot/ROOT/web"
+    - caption: NFS mounts from the services env storage node
+      type: text
+      name: MOUNTS
+      required: false
+      description: "One per line: <source path on storage node> <target path on this box>.
+        e.g. drupal: /data/files /var/www/webroot/ROOT/web/sites/default/files
+        magento: /data/media /var/www/webroot/ROOT/pub/media. Existing mount
+        points are left alone."
     - caption: Alert / backup email
       type: string
       name: BACKUP_EMAIL
@@ -46,7 +54,7 @@ settings:
       required: false
       description: Public key printed by the Services add-on. Lets the services
         node's n8n pull a health snapshot from this box over SSH. Can be added
-        later via the "Authorize monitor key" button.
+        later via the "Authorize monitor key" button (or "phpbox authorize-key" in the terminal).
     - caption: Config repo ref
       type: string
       name: REPO_REF
@@ -63,11 +71,14 @@ settings:
 
 onInstall:
   - provision
+  - mounts
 
 # GUI "Redeploy Containers" (PHP tag change) wipes everything outside the
 # volumes and redeploy.conf; run the provisioner again on the fresh image.
+# Mount points are env config and survive, mounts is idempotent anyway.
 onAfterRedeployContainer [cp]:
   - provision
+  - mounts
 
 onUninstall:
   - cmd [cp]: |-
@@ -91,6 +102,10 @@ buttons:
     loadingText: Adding key...
     action: authorizeMonitorKey
     successText: Key added to nginx's authorized_keys on the AppServer.
+  - caption: Apply mounts
+    confirmText: Create any NFS mount points from the add-on's MOUNTS setting that do not exist yet?
+    loadingText: Mounting...
+    action: showMounts
   - caption: Show services IPs
     loadingText: Resolving...
     action: showServices
@@ -132,6 +147,48 @@ actions:
         bash /root/provision-cp.sh 2>&1 | tee -a /var/log/run.log
       user: root
       sayYes: true
+
+  # NFS mount points on the cp layer from the services env's storage node.
+  # "src dst" per line (also ; or , separated). Skips paths already mounted.
+  mounts:
+    script: |
+      var raw = getParam('MOUNTS') || '', envName = '${env.envName}', svc = '${settings.SERVICES_ENV:}';
+      var items = String(raw).split(/[\r\n;,]+/), wanted = [], i;
+      for (i = 0; i < items.length; i++) {
+        var p = items[i].replace(/^\s+|\s+$/g, '').split(/\s+/);
+        if (p.length >= 2 && p[0].charAt(0) == '/' && p[1].charAt(0) == '/') wanted.push({ src: p[0], dst: p[1] });
+      }
+      if (!wanted.length) return { result: 0, out: 'no mounts configured' };
+      if (!svc) return { result: 0, out: 'no services env selected' };
+      var r = api.env.control.GetEnvInfo(svc, session);
+      if (r.result != 0) return r;
+      var st = null;
+      for (i = 0; i < r.nodes.length; i++) {
+        var n = r.nodes[i];
+        if (n.nodeGroup == 'storage' && (!st || n.ismaster)) st = n;
+      }
+      if (!st) return { result: 0, out: 'no storage node in ' + svc };
+      var ex = api.env.file.GetMountPoints(envName, session, null, 'cp');
+      if (ex.result != 0) return ex;
+      var have = {}, arr = ex.array || [];
+      for (i = 0; i < arr.length; i++) have[arr[i].path] = true;
+      var out = [];
+      for (i = 0; i < wanted.length; i++) {
+        var w = wanted[i];
+        if (have[w.dst]) { out.push('exists: ' + w.dst); continue; }
+        var a = api.env.file.AddMountPointByGroup(envName, session, 'cp', w.dst, 'nfs', st.intIP, w.src, st.id, '', false, 'IP');
+        if (a.result != 0) return a;
+        out.push('mounted ' + st.intIP + ':' + w.src + ' -> ' + w.dst);
+      }
+      return { result: 0, out: out.join('; ') };
+    params:
+      MOUNTS: ${settings.MOUNTS:}
+
+  showMounts:
+    - mounts
+    - return:
+        type: success
+        message: ${response.out}
 
   updateFail2ban:
     - cmd [cp]: bash /root/fail2banUpdate.sh
@@ -175,8 +232,9 @@ success:
   text: |
     ## ProxiBlue PHP Box add-on installed (${settings.SITE_PROFILE})
 
-    * Credentials: **Show credentials** button on the add-on (also in
-      `/root/phpbox-credentials.txt` on the AppServer).
+    * Terminal: `su -` on the AppServer then `phpbox status | creds | env |
+      reapply | fail2ban-update | authorize-key | log`.
+    * Credentials: `phpbox creds` (or the **Show credentials** button).
     * Services env `${settings.SERVICES_ENV}`: hosts entries `DB_MASTER`
       (+ `RD_MASTER` / `ES_MASTER` where those layers exist). **Show services
       IPs** lists them. Local cache Redis on socket `/tmp/redis.sock`.
