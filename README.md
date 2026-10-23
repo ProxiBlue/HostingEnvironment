@@ -166,7 +166,7 @@ provisioner): `/etc/phpbox.env`, `/root/phpbox-credentials.txt`,
 
 ## Security notes
 
-- PHP: `expose_php=Off`, `allow_url_include=Off`, `open_basedir` limited to
+- PHP: `expose_php=Off`, `allow_url_include=Off`, `open_basedir` (FPM pool only, CLI/drush unrestricted) limited to
   `/var/www/webroot`, `/tmp`, the composer cache and the PHP binary path,
   `disable_functions=passthru` (`proc_open`/`popen` stay: Composer needs
   them), secure session cookies, `request_terminate_timeout=600s`, slowlog
