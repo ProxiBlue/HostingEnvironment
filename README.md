@@ -44,7 +44,8 @@ dialog closes. The Let's Encrypt add-on does the same for its certificate.
 | Site profile | `magento` or `drupal`: picks the nginx vhost, fail2ban jails, crons, health probe |
 | Services environment | dropdown of your envs; the add-on reads the `sqldb` (and `nosqldb`, `es` if present) node IPs from it via the API. Nothing is installed there. |
 | Document root | blank = `ROOT/pub` (magento) / `ROOT/web` (drupal) |
-| NFS mounts | shown per profile with prefilled defaults (drupal: `/data` → `ROOT/web/sites/default/files` + the UAT `/backups`, `/data`; magento: `/data` → `ROOT/pub/media`). One per line `<path on storage node> <path on this box>`, `<envName>:/path` for another env's storage. Created via the API, existing mount points untouched |
+| NFS mounts | shown per profile with prefilled defaults (drupal: `/data` → `ROOT/web/sites/default/files` + the UAT `/backups`, `/data`; magento: `/data` → `/var/www/webroot/nfs`, with `ROOT/pub/media` a symlink into it). One per line `<path on storage node> <path on this box>`, `<envName>:/path` for another env's storage. Created via the API, existing mount points untouched |
+| Behind Cloudflare | checkbox. nginx trusts `CF-Connecting-IP` from Cloudflare's published ranges (fetched at provision time into `conf.d/cloudflare-realip.conf`), so access logs and fail2ban see the visitor. Certificate: see below |
 | Alert / backup email | fail2ban, backup mail |
 | Monitor SSH public key | optional, from the Services add-on |
 | Config repo ref | pin a commit sha while testing (raw.githubusercontent caches `main` ~5 min) |
@@ -71,6 +72,31 @@ Afterwards, on the AppServer (`su -`, password from `phpbox creds`):
    from the document root. For a DNS swap-over, issue the cert after DNS
    points at the new box (or copy the old cert into `/var/lib/jelastic/SSL/`
    first and swap `ssl.conf.disabled` → `ssl.conf`).
+
+   **Behind Cloudflare** (orange-cloud DNS, Cloudflare terminates the public
+   TLS): no Let's Encrypt. Put the Cloudflare **origin certificate** on the
+   NFS share once, as `<nfs mount>/ssl/jelastic.chain` (cert) and
+   `jelastic.key` (root:nginx 0640; `/var/www/webroot/nfs/ssl/` with the
+   magento default mount). The add-on's `sslSeed` step (after the mounts
+   exist, on install and after every redeploy) copies it into
+   `/var/lib/jelastic/SSL/` when the box has none and enables `ssl.conf`;
+   `phpbox ssl` does the same by hand. Served from local disk so nginx does
+   not depend on NFS at start. Swap-over = change the A record in
+   Cloudflare; origin certs last 15 years, so renewal is a non-issue.
+
+   Magento `app/etc/env.php` for this topology (hosts from `/etc/hosts`,
+   local socket Redis for cache, services-env Redis for sessions):
+
+   ```php
+   'db' => ['connection' => ['default' => ['host' => 'DB_MASTER', ...]]],
+   'session' => ['save' => 'redis', 'redis' => ['host' => 'RD_MASTER', 'port' => '6379', 'database' => '2', ...]],
+   'cache' => ['frontend' => [
+     'default'    => ['backend' => 'Cm_Cache_Backend_Redis', 'backend_options' => ['server' => '/tmp/redis.sock', 'port' => '0', 'database' => '0']],
+     'page_cache' => ['backend' => 'Cm_Cache_Backend_Redis', 'backend_options' => ['server' => '/tmp/redis.sock', 'port' => '0', 'database' => '1']],
+   ]],
+   ```
+   OpenSearch host lives in `core_config_data` (`catalog/search/opensearch_server_hostname`
+   → `ES_MASTER`) or under `system` in `env.php`.
 
 Existing PHP env: **Import** → **URL** → `.../addons/phpbox-addon.jps`, pick
 the env + `cp` layer, same fields. Test on a **clone** first - the
@@ -143,6 +169,8 @@ key**), **Update n8n**.
 | `phpbox reapply [ref]` | re-run the provisioner (from a git ref if given) |
 | `phpbox fail2ban-update` | refresh filters/jails |
 | `phpbox authorize-key 'ssh-ed25519 ...'` | allow the services monitor in as `nginx` |
+| `phpbox mounts` | configured mount list vs. autofs map vs. mounted |
+| `phpbox ssl` | seed the cert from `<nfs>/ssl/` if the box has none, enable `ssl.conf`, reload nginx |
 | `phpbox log [n]` | provision log tail |
 
 Add-on buttons (same actions, plus the ones that need the platform API):

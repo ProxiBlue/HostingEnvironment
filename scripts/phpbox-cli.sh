@@ -10,6 +10,7 @@
 #   phpbox fail2ban-update    refresh fail2ban filters/jails from the repo
 #   phpbox authorize-key KEY  allow the services monitor to ssh in as nginx
 #   phpbox mounts             configured mount list (/etc/phpbox-mounts.txt) vs. what is mounted
+#   phpbox ssl                seed cert from <nfs>/ssl/ if the box has none, enable https, reload nginx
 #   phpbox log [N]            last N lines of the provision log (default 40)
 set -u
 
@@ -30,7 +31,7 @@ c_status() {
   echo "  php    $(php -r 'echo PHP_VERSION;' 2>/dev/null)"
   echo "  nginx  $(nginx -v 2>&1 | sed 's/nginx version: //')"
   echo "  redis  $(redis-cli -s /tmp/redis.sock ping 2>&1) (socket) / $(redis-cli -h 127.0.0.1 ping 2>&1) (tcp)"
-  echo "== profile ${SITE_PROFILE:-?}  docroot ${DOCROOT:-?}"
+  echo "== profile ${SITE_PROFILE:-?}  docroot ${DOCROOT:-?}  cloudflare ${CLOUDFLARE:-false}"
   echo "== services env"
   printf '  DB_MASTER  %-16s tcp/3306 %s\n' "${DB_HOST:-}" "$( [ -n "${DB_HOST:-}" ] && (timeout 3 bash -c "</dev/tcp/$DB_HOST/3306" 2>/dev/null && echo open || echo CLOSED) )"
   [ -n "${REDIS_HOST:-}" ] && printf '  RD_MASTER  %-16s %s\n' "$REDIS_HOST" "$(redis-cli -h "$REDIS_HOST" ping 2>&1 | tail -1)"
@@ -94,6 +95,13 @@ c_mounts() {
   mount | grep -E 'nfs|autofs' | awk '{print "  "$1" -> "$3" ("$5")"}' || true
 }
 
+c_ssl() {
+  need_root; load_env
+  [ -x /root/provision-cp.sh ] || curl -fsSL "https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/$REPO_REF/scripts/provision-cp.sh" -o /root/provision-cp.sh
+  chmod +x /root/provision-cp.sh
+  bash /root/provision-cp.sh ssl
+}
+
 c_log() { tail -n "${1:-40}" "$LOG"; }
 
 case "${1:-}" in
@@ -104,6 +112,7 @@ case "${1:-}" in
   fail2ban-update) c_f2b ;;
   authorize-key)   c_authorize "${2:-}" ;;
   mounts)          c_mounts ;;
+  ssl)             c_ssl ;;
   log)             c_log "${2:-40}" ;;
-  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

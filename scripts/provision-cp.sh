@@ -21,8 +21,15 @@
 #                    optional. NFS mount list for the profile, "src dst" per
 #                    line; written to /etc/phpbox-mounts.txt (kept across
 #                    redeploys). The add-on's mounts action reads that file.
+#   CLOUDFLARE       true|false. Site is behind Cloudflare's proxy: nginx
+#                    trusts CF-Connecting-IP from Cloudflare's published
+#                    ranges (fail2ban / logs see the visitor). Default: false.
 #   REPO_REF         git ref of ProxiBlue/HostingEnvironment to pull
 #                    configs from. Default: main.
+#
+# Modes:  provision-cp.sh        full run
+#         provision-cp.sh ssl    only the certificate step (seed from NFS,
+#                                enable ssl.conf, reload nginx)
 set -euo pipefail
 
 ENV_FILE=/etc/phpbox.env
@@ -32,6 +39,10 @@ REDEPLOY_CONF=/etc/jelastic/redeploy.conf
 SNAPSHOT_BIN=/usr/local/bin/n8n-server-snapshot.sh
 VHOST=/etc/nginx/conf.d/SITES_ENABLED/site-default.conf
 MOUNTS_FILE=/etc/phpbox-mounts.txt
+SSL_DIR=/var/lib/jelastic/SSL
+# Hand-managed certificate (e.g. Cloudflare origin CA) kept on the NFS share
+# so a brand-new box picks it up: <nfs>/ssl/jelastic.chain + jelastic.key
+SSL_SEED_DIR=/var/www/webroot/nfs/ssl
 
 log() { echo "[provision-cp] $*" | tee -a "$LOG"; }
 die() { echo "[provision-cp] FATAL: $*" | tee -a "$LOG" >&2; exit 1; }
@@ -58,6 +69,7 @@ load_env() {
   : "${ES_HOST:=}"
   : "${MOUNTS_DRUPAL:=}"
   : "${MOUNTS_MAGENTO:=}"
+  : "${CLOUDFLARE:=false}"
   case "$SITE_PROFILE" in
     magento) : "${DOCROOT:=/var/www/webroot/ROOT/pub}" ;;
     drupal)  : "${DOCROOT:=/var/www/webroot/ROOT/web}" ;;
@@ -79,6 +91,7 @@ DB_HOST="$DB_HOST"
 REDIS_HOST="$REDIS_HOST"
 ES_HOST="$ES_HOST"
 BACKUP_EMAIL="$BACKUP_EMAIL"
+CLOUDFLARE="$CLOUDFLARE"
 REPO_REF="$REPO_REF"
 EOF
   umask 022
@@ -215,13 +228,28 @@ nginx_config() {
 
 # --- TLS: enable ssl.conf when a certificate is present --------------------
 
+ssl_seed() {
+  # No certificate on the box yet but one on the NFS share (Cloudflare origin
+  # cert, or anything uploaded by hand): copy it in. Served from local disk so
+  # nginx does not depend on NFS at start; redeploy.conf keeps $SSL_DIR.
+  [ -s "$SSL_DIR/jelastic.chain" ] && [ -s "$SSL_DIR/jelastic.key" ] && return 0
+  [ -s "$SSL_SEED_DIR/jelastic.chain" ] && [ -s "$SSL_SEED_DIR/jelastic.key" ] || return 0
+  install -d -m 0750 -o root -g nginx "$SSL_DIR"
+  install -m 0640 -o root -g nginx "$SSL_SEED_DIR/jelastic.chain" "$SSL_DIR/jelastic.chain"
+  install -m 0640 -o root -g nginx "$SSL_SEED_DIR/jelastic.key"   "$SSL_DIR/jelastic.key"
+  cp -f "$SSL_DIR/jelastic.chain" "$SSL_DIR/jelastic.cert"
+  log "ssl: certificate seeded from $SSL_SEED_DIR ($(openssl x509 -in "$SSL_DIR/jelastic.chain" -noout -subject 2>/dev/null))"
+}
+
 ssl_enable() {
-  # The Let's Encrypt add-on (or a manual upload) puts the certificate in
-  # /var/lib/jelastic/SSL/. On stack nodes "jem ssl" switches ssl.conf on; on
-  # this plain docker node nothing does, and a redeploy wipes /etc/nginx anyway.
+  # The Let's Encrypt add-on (or ssl_seed / a manual upload) puts the
+  # certificate in /var/lib/jelastic/SSL/. On stack nodes "jem ssl" switches
+  # ssl.conf on; on this plain docker node nothing does, and a redeploy wipes
+  # /etc/nginx anyway.
   local ssl=/etc/nginx/conf.d/ssl.conf
-  if [ ! -s /var/lib/jelastic/SSL/jelastic.chain ] || [ ! -s /var/lib/jelastic/SSL/jelastic.key ]; then
-    log "ssl: no certificate in /var/lib/jelastic/SSL yet, https stays off"
+  ssl_seed
+  if [ ! -s "$SSL_DIR/jelastic.chain" ] || [ ! -s "$SSL_DIR/jelastic.key" ]; then
+    log "ssl: no certificate in $SSL_DIR yet, https stays off"
     return 0
   fi
   if [ -f "$ssl" ] && grep -qE '^\s*listen\s+.*443' "$ssl"; then
@@ -230,6 +258,27 @@ ssl_enable() {
   fetch configs/nginx/ssl.conf.disabled "$ssl"
   nginx -t >>"$LOG" 2>&1 || { log "ssl: nginx -t failed with ssl.conf, disabling"; mv "$ssl" "$ssl.disabled"; return 0; }
   log "ssl: enabled $ssl (certificate found)"
+}
+
+cloudflare_realip() {
+  local conf=/etc/nginx/conf.d/cloudflare-realip.conf
+  if [ "$CLOUDFLARE" != true ]; then
+    [ -f "$conf" ] && { rm -f "$conf"; log "cloudflare: real-ip config removed"; }
+    return 0
+  fi
+  local v4 v6
+  v4="$(curl -fsSL --max-time 15 https://www.cloudflare.com/ips-v4 2>/dev/null || true)"
+  v6="$(curl -fsSL --max-time 15 https://www.cloudflare.com/ips-v6 2>/dev/null || true)"
+  if [ -z "$v4" ]; then
+    [ -f "$conf" ] && { log "cloudflare: range download failed, keeping existing $conf"; return 0; }
+    die "cloudflare: could not download IP ranges from www.cloudflare.com"
+  fi
+  {
+    echo "# Written by provision-cp.sh (CLOUDFLARE=true). Ranges from https://www.cloudflare.com/ips-v4 and ips-v6."
+    for r in $v4 $v6; do echo "set_real_ip_from $r;"; done
+    echo "real_ip_header CF-Connecting-IP;"
+  } > "$conf"
+  log "cloudflare: real-ip config written ($(grep -c set_real_ip_from "$conf") ranges)"
 }
 
 # --- local Redis (page/object cache, unix socket) --------------------------
@@ -438,6 +487,7 @@ main() {
   install_awscli
   php_config
   nginx_config
+  cloudflare_realip
   ssl_enable
   redis_local
   hosts_and_env
@@ -453,4 +503,18 @@ main() {
   verify
 }
 
-main "$@"
+ssl_only() {
+  load_env
+  ssl_enable
+  nginx -t >>"$LOG" 2>&1 || die "nginx -t failed, see $LOG"
+  systemctl reload nginx >>"$LOG" 2>&1 || systemctl restart nginx >>"$LOG" 2>&1
+  if [ -s "$SSL_DIR/jelastic.chain" ]; then
+    log "ssl: $(openssl x509 -in "$SSL_DIR/jelastic.chain" -noout -subject -enddate 2>/dev/null | tr '\n' ' ')"
+  fi
+}
+
+case "${1:-}" in
+  ssl) ssl_only ;;
+  "")  main ;;
+  *)   die "unknown mode '$1' (use: ssl)" ;;
+esac

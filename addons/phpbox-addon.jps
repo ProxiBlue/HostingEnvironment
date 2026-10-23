@@ -40,7 +40,7 @@ settings:
             name: MOUNTS_MAGENTO
             required: false
             value: |-
-              /data /var/www/webroot/ROOT/pub/media
+              /data /var/www/webroot/nfs
             description: "One per line: <path on services storage node> <path on this box>; other env: <envName>:/path. Existing mount points are left alone."
     - caption: Services environment
       type: envlist
@@ -55,6 +55,13 @@ settings:
       name: DOCROOT
       required: false
       description: "magento: /var/www/webroot/ROOT/pub, drupal: /var/www/webroot/ROOT/web"
+    - caption: Behind Cloudflare (proxied DNS)
+      type: checkbox
+      name: CLOUDFLARE
+      value: false
+      description: Trust CF-Connecting-IP from Cloudflare's ranges so logs and
+        fail2ban see the visitor, not the edge. Origin certificate is picked up
+        from <nfs mount>/ssl/jelastic.chain + jelastic.key.
     - caption: Alert / backup email
       type: string
       name: BACKUP_EMAIL
@@ -83,6 +90,7 @@ settings:
 onInstall:
   - provision
   - mounts
+  - sslSeed
 
 # GUI "Redeploy Containers" (PHP tag change) wipes everything outside the
 # volumes and redeploy.conf; run the provisioner again on the fresh image.
@@ -90,6 +98,7 @@ onInstall:
 onAfterRedeployContainer [cp]:
   - provision
   - mounts
+  - sslSeed
 
 onUninstall:
   - cmd [cp]: |-
@@ -153,6 +162,7 @@ actions:
         export MONITOR_SSH_KEY='${settings.MONITOR_SSH_KEY:}'
         export MOUNTS_DRUPAL='${settings.MOUNTS_DRUPAL:}'
         export MOUNTS_MAGENTO='${settings.MOUNTS_MAGENTO:}'
+        export CLOUDFLARE='${settings.CLOUDFLARE:false}'
         export REPO_REF='${settings.REPO_REF:main}'
         curl -fsSL "https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${settings.REPO_REF:main}/scripts/provision-cp.sh" -o /root/provision-cp.sh
         chmod +x /root/provision-cp.sh
@@ -227,6 +237,12 @@ actions:
 
   updateFail2ban:
     - cmd [cp]: bash /root/fail2banUpdate.sh
+      user: root
+
+  # Runs after the mounts exist: copies <nfs>/ssl/jelastic.{chain,key} into
+  # /var/lib/jelastic/SSL when the box has no certificate yet, enables https.
+  sslSeed:
+    - cmd [cp]: /usr/local/bin/phpbox ssl
       user: root
 
   authorizeMonitorKey:

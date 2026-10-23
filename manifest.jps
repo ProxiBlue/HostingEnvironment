@@ -43,7 +43,7 @@ settings:
           name: MOUNTS_MAGENTO
           required: false
           value: |-
-            /data /var/www/webroot/ROOT/pub/media
+            /data /var/www/webroot/nfs
           description: "One per line: <path on services storage node> <path on this box>; other env: <envName>:/path"
   - caption: Services environment
     type: envlist
@@ -58,6 +58,13 @@ settings:
     name: DOCROOT
     required: false
     description: "magento: /var/www/webroot/ROOT/pub, drupal: /var/www/webroot/ROOT/web"
+  - caption: Behind Cloudflare (proxied DNS)
+    type: checkbox
+    name: CLOUDFLARE
+    value: false
+    description: Trust CF-Connecting-IP from Cloudflare's ranges so logs and
+      fail2ban see the visitor, not the edge. Origin certificate is picked up
+      from <nfs mount>/ssl/jelastic.chain + jelastic.key.
   - caption: Alert / backup email
     type: string
     name: BACKUP_EMAIL
@@ -102,6 +109,7 @@ onInstall:
         DOCROOT: ${settings.DOCROOT:}
         MOUNTS_DRUPAL: ${settings.MOUNTS_DRUPAL:}
         MOUNTS_MAGENTO: ${settings.MOUNTS_MAGENTO:}
+        CLOUDFLARE: ${settings.CLOUDFLARE:false}
         BACKUP_EMAIL: ${settings.BACKUP_EMAIL}
         MONITOR_SSH_KEY: ${settings.MONITOR_SSH_KEY:}
         REPO_REF: ${settings.REPO_REF}
