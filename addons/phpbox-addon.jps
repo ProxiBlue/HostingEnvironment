@@ -171,7 +171,7 @@ actions:
       // provision-cp.sh from the profile's setting; kept across redeploys;
       // editable by hand, then "Apply mounts" / phpbox mounts).
       var envName = '${env.envName}', svc = '${settings.SERVICES_ENV:}';
-      var f = api.env.file.Read(envName, session, '/etc/phpbox-mounts.txt', null, 'cp');
+      var f = api.env.file.Read({ envName: envName, session: session, path: '/etc/phpbox-mounts.txt', nodeGroup: 'cp' });
       if (f.result != 0) return { result: 0, out: 'no /etc/phpbox-mounts.txt on the box (' + f.error + ')' };
       var raw = f.body || '';
       var items = String(raw).split(/[\r\n;,]+/), wanted = [], i;
@@ -199,7 +199,7 @@ actions:
         storage[e] = st;
         return st;
       }
-      var ex = api.env.file.GetMountPoints(envName, session, null, 'cp');
+      var ex = api.env.file.GetMountPoints({ envName: envName, session: session, nodeGroup: 'cp' });
       if (ex.result != 0) return ex;
       var have = {}, arr = ex.array || [];
       for (i = 0; i < arr.length; i++) have[arr[i].path] = true;
@@ -209,7 +209,11 @@ actions:
         if (have[w.dst]) { out.push('exists: ' + w.dst); continue; }
         var st = storageNode(w.env);
         if (!st) { out.push('SKIPPED ' + w.dst + ': no storage node in env ' + w.env); continue; }
-        var a = api.env.file.AddMountPointByGroup(envName, session, 'cp', w.dst, 'nfs', st.intIP, w.src, st.id, '', false, 'IP');
+        var a = api.env.file.AddMountPointByGroup({
+          envName: envName, session: session, nodeGroup: 'cp', path: w.dst,
+          protocol: 'nfs', sourceHost: st.intIP, sourcePath: w.src, sourceNodeId: st.id,
+          readOnly: false, sourceAddressType: 'IP'
+        });
         if (a.result != 0) return a;
         out.push('mounted ' + w.env + ':' + w.src + ' -> ' + w.dst);
       }
