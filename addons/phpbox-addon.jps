@@ -151,6 +151,8 @@ actions:
         export ES_HOST='${response.esIp}'
         export BACKUP_EMAIL='${settings.BACKUP_EMAIL:}'
         export MONITOR_SSH_KEY='${settings.MONITOR_SSH_KEY:}'
+        export MOUNTS_DRUPAL='${settings.MOUNTS_DRUPAL:}'
+        export MOUNTS_MAGENTO='${settings.MOUNTS_MAGENTO:}'
         export REPO_REF='${settings.REPO_REF:main}'
         curl -fsSL "https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${settings.REPO_REF:main}/scripts/provision-cp.sh" -o /root/provision-cp.sh
         chmod +x /root/provision-cp.sh
@@ -165,12 +167,18 @@ actions:
     script: |
       // Lines: "<src> <dst>". src = path on the services env's storage node,
       // or "<otherEnv>:<path>" for a storage node in another env (e.g. UAT).
-      var profile = getParam('PROFILE') || 'magento';
-      var raw = getParam(profile == 'drupal' ? 'MOUNTS_DRUPAL' : 'MOUNTS_MAGENTO') || '';
+      // The list lives in /etc/phpbox-mounts.txt on the box (written by
+      // provision-cp.sh from the profile's setting; kept across redeploys;
+      // editable by hand, then "Apply mounts" / phpbox mounts).
       var envName = '${env.envName}', svc = '${settings.SERVICES_ENV:}';
+      var f = api.env.file.Read(envName, session, '/etc/phpbox-mounts.txt', null, 'cp');
+      if (f.result != 0) return { result: 0, out: 'no /etc/phpbox-mounts.txt on the box (' + f.error + ')' };
+      var raw = f.body || '';
       var items = String(raw).split(/[\r\n;,]+/), wanted = [], i;
       for (i = 0; i < items.length; i++) {
-        var p = items[i].replace(/^\s+|\s+$/g, '').split(/\s+/);
+        var line = items[i].replace(/^\s+|\s+$/g, '');
+        if (!line || line.charAt(0) == '#') continue;
+        var p = line.split(/\s+/);
         if (p.length < 2 || p[1].charAt(0) != '/') continue;
         var m = p[0].match(/^([^:\/]+):(\/.*)$/);
         if (m) wanted.push({ env: m[1], src: m[2], dst: p[1] });
@@ -206,10 +214,6 @@ actions:
         out.push('mounted ' + w.env + ':' + w.src + ' -> ' + w.dst);
       }
       return { result: 0, out: out.join('; ') };
-    params:
-      PROFILE: ${settings.SITE_PROFILE:magento}
-      MOUNTS_DRUPAL: ${settings.MOUNTS_DRUPAL:}
-      MOUNTS_MAGENTO: ${settings.MOUNTS_MAGENTO:}
 
   showMounts:
     - mounts

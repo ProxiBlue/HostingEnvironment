@@ -9,6 +9,7 @@
 #   phpbox reapply [REF]      re-run the provisioner (optionally from git ref REF)
 #   phpbox fail2ban-update    refresh fail2ban filters/jails from the repo
 #   phpbox authorize-key KEY  allow the services monitor to ssh in as nginx
+#   phpbox mounts             configured mount list (/etc/phpbox-mounts.txt) vs. what is mounted
 #   phpbox log [N]            last N lines of the provision log (default 40)
 set -u
 
@@ -77,6 +78,15 @@ c_authorize() {
   grep -qF -- "$key" "$ak" && echo "already present" || { echo "$key" >> "$ak"; echo "added"; }
 }
 
+c_mounts() {
+  echo "== configured (/etc/phpbox-mounts.txt) - edit, then add-on button 'Apply mounts'"
+  grep -vE '^\s*(#|$)' /etc/phpbox-mounts.txt 2>/dev/null || echo "  (none)"
+  echo "== autofs map (/etc/autofs.jelastic)"
+  sed 's/-fstype=[^ ]* //' /etc/autofs.jelastic 2>/dev/null || echo "  (none)"
+  echo "== mounted now"
+  mount | grep -E 'nfs|autofs' | awk '{print "  "$1" -> "$3" ("$5")"}' || true
+}
+
 c_log() { tail -n "${1:-40}" "$LOG"; }
 
 case "${1:-}" in
@@ -86,6 +96,7 @@ case "${1:-}" in
   reapply)         c_reapply "${2:-}" ;;
   fail2ban-update) c_f2b ;;
   authorize-key)   c_authorize "${2:-}" ;;
+  mounts)          c_mounts ;;
   log)             c_log "${2:-40}" ;;
-  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

@@ -17,6 +17,10 @@
 #   BACKUP_EMAIL     alerts + backup failure mail                     (required once)
 #   MONITOR_SSH_KEY  optional. ssh public key of the services-node monitor
 #                    (n8n). Appended to nginx's authorized_keys.
+#   MOUNTS_DRUPAL / MOUNTS_MAGENTO
+#                    optional. NFS mount list for the profile, "src dst" per
+#                    line; written to /etc/phpbox-mounts.txt (kept across
+#                    redeploys). The add-on's mounts action reads that file.
 #   REPO_REF         git ref of ProxiBlue/HostingEnvironment to pull
 #                    configs from. Default: main.
 set -euo pipefail
@@ -27,6 +31,7 @@ LOG=/var/log/phpbox-provision.log
 REDEPLOY_CONF=/etc/jelastic/redeploy.conf
 SNAPSHOT_BIN=/usr/local/bin/n8n-server-snapshot.sh
 VHOST=/etc/nginx/conf.d/SITES_ENABLED/site-default.conf
+MOUNTS_FILE=/etc/phpbox-mounts.txt
 
 log() { echo "[provision-cp] $*" | tee -a "$LOG"; }
 die() { echo "[provision-cp] FATAL: $*" | tee -a "$LOG" >&2; exit 1; }
@@ -51,6 +56,8 @@ load_env() {
   : "${MONITOR_SSH_KEY:=}"
   : "${REDIS_HOST:=}"
   : "${ES_HOST:=}"
+  : "${MOUNTS_DRUPAL:=}"
+  : "${MOUNTS_MAGENTO:=}"
   case "$SITE_PROFILE" in
     magento) : "${DOCROOT:=/var/www/webroot/ROOT/pub}" ;;
     drupal)  : "${DOCROOT:=/var/www/webroot/ROOT/web}" ;;
@@ -330,6 +337,26 @@ EOF
   fi
 }
 
+# --- NFS mount list (consumed by the add-on's mounts action via the API) ----
+
+mounts_file() {
+  local list=""
+  case "$SITE_PROFILE" in
+    drupal)  list="$MOUNTS_DRUPAL" ;;
+    magento) list="$MOUNTS_MAGENTO" ;;
+  esac
+  if [ -n "$list" ]; then
+    {
+      echo "# NFS mounts for this box: <path on services storage node> <path here>"
+      echo "# other env's storage: <envName>:/path <path here>. Apply: add-on button or 'phpbox mounts'"
+      echo "$list"
+    } > "$MOUNTS_FILE"
+    log "mount list written to $MOUNTS_FILE ($(grep -c '^/\|^[^#].*:/' "$MOUNTS_FILE") entries)"
+  elif [ ! -f "$MOUNTS_FILE" ]; then
+    log "no mount list given and no $MOUNTS_FILE yet"
+  fi
+}
+
 # --- terminal front-end ----------------------------------------------------
 
 install_cli() {
@@ -350,6 +377,7 @@ redeploy_conf() {
     /etc/nginx/conf.d/CORS/
     /var/spool/cron/root
     /var/lib/redis/
+    "$MOUNTS_FILE"
   )
   for p in "${keep[@]}"; do
     grep -qxF -- "$p" "$REDEPLOY_CONF" && continue
@@ -397,6 +425,7 @@ main() {
   logrotate_config
   crons
   monitor_access
+  mounts_file
   install_cli
   redeploy_conf
   restart_services
