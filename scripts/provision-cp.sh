@@ -171,6 +171,31 @@ install_awscli() {
 
 # --- PHP -------------------------------------------------------------------
 
+php_imap() {
+  # PHP 8.4 moved imap to PECL and the image does not ship it. Build it
+  # against Remi's uw-imap c-client (the only EL9 source of libc-client);
+  # the image already carries the remi repo files, disabled.
+  local extdir; extdir="$(php -n -r 'echo ini_get("extension_dir");')"
+  php -n -r 'exit(extension_loaded("imap") ? 0 : 1);' 2>/dev/null && return 0   # built in (< 8.4)
+  if [ -f "$extdir/imap.so" ] && php -n -d "extension=$extdir/imap.so" -r 'exit(function_exists("imap_open") ? 0 : 1);' 2>/dev/null; then
+    return 0
+  fi
+  log "building PHP imap extension from PECL"
+  yum install -y --enablerepo=remi uw-imap-devel openssl-devel krb5-devel pam-devel autoconf automake libtool gcc make >>"$LOG" 2>&1 \
+    || die "imap: could not install build deps (remi repo missing?), see $LOG"
+  # PECL's configure looks for lib<name>.* under <prefix>/$PHP_LIBDIR, which is
+  # "lib" for this build; Remi installs the shared lib in lib64 only.
+  [ -e /usr/lib/libc-client.so ] || ln -s /usr/lib64/libc-client.so /usr/lib/libc-client.so
+  local tmp; tmp="$(mktemp -d)"
+  ( cd "$tmp" && pecl download imap && tar xzf imap-*.tgz && cd imap-*/ \
+    && phpize && ./configure --with-imap=/usr --with-kerberos --with-imap-ssl \
+    && make -j"$(nproc)" && make install ) >>"$LOG" 2>&1 || { rm -rf "$tmp"; die "imap: build failed, see $LOG"; }
+  rm -rf "$tmp"
+  php -n -d "extension=$extdir/imap.so" -r 'exit(function_exists("imap_open") ? 0 : 1);' 2>/dev/null \
+    || die "imap: built but does not load"
+  log "imap.so built for PHP $(php -r 'echo PHP_VERSION;')"
+}
+
 php_config() {
   # /etc/php.d survives a redeploy, which is exactly why it must be
   # regenerated: a stale extensions.ini from the previous PHP line breaks the
@@ -493,6 +518,7 @@ main() {
   apply_system_passwords
   install_packages
   install_awscli
+  php_imap
   php_config
   nginx_config
   cloudflare_realip

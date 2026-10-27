@@ -123,7 +123,10 @@ pin a recent one so the redeploy run includes all current logic.
 
 `/etc/php.d/` survives the redeploy, which is why the provisioner regenerates
 it and drops any `extension=` line whose `.so` does not exist in the new
-image (imap gone in 8.4, opcache built in from 8.5).
+image (opcache built in from 8.5). PHP 8.4 dropped imap from core and the
+image does not ship it, so the provisioner builds the PECL `imap` extension
+(against Remi's `uw-imap-devel`, ~1 min) whenever `imap.so` is missing,
+i.e. once per redeploy.
 
 Jelastic publishes PHP patch images a few weeks after php.net. The
 `docker/nginxphp/` image + `.github/workflows/nginxphp-image.yml` rebuild PHP
