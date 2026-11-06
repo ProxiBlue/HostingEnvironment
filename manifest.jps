@@ -82,10 +82,14 @@ settings:
 skipNodeEmails: true
 
 nodes:
-# Pulled straight from Docker Hub: nodeType nginxphp-dockerized + tag silently
-# falls back to the provider's default stack when its catalog lacks the tag.
-- nodeType: docker
-  image: jelastic/nginxphp:${settings.PHP_VERSION}
+# Certified stack (not nodeType docker): only stack nodes get the dashboard
+# firewall; a docker node shows "Firewall is not supported for this node".
+# The tag must be in the provider's catalog for nginxphp-dockerized, else the
+# platform silently falls back to its default stack; checkPhpVersion aborts
+# the install in that case. List the catalog: Change Environment Topology ->
+# NGINX PHP -> tag dropdown (1.30.6-php-8.4.27-almalinux-9 listed 2026-11-06).
+- nodeType: nginxphp-dockerized
+  tag: ${settings.PHP_VERSION}
   count: 1
   cloudlets: 74
   extip: 1
@@ -121,6 +125,7 @@ actions:
       want=$(echo '${settings.PHP_VERSION}' | sed -E 's/.*-php-([0-9.]+)-.*/\1/')
       have=$(php -r 'echo PHP_VERSION;')
       echo "AppServer PHP $have, expected $want"
+      echo "Firewall: $(grep -E '^FIREWALL_ENABLED=' /etc/jelastic/metainf.conf || echo 'FIREWALL_ENABLED not set')"
       [ "$have" = "$want" ] || exit 1
     user: root
 

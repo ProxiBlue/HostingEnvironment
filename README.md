@@ -135,8 +135,16 @@ from source on the newest Jelastic base and publish
 Redeploy dialog to use it. The ghcr path is not yet proven on a real redeploy
 (the Docker Hub tag path is).
 
-Image facts that shaped the provisioner (plain `docker` node type, not the
-`nginxphp-dockerized` stack): no redis server, `passwd`, `iptables`, `jem`
+Node type: since 2026-11-06 `manifest.jps` builds the AppServer as the
+certified `nginxphp-dockerized` stack (tag from the provider's catalog), because
+only stack nodes get the dashboard firewall ("Firewall is not supported for
+this node" on `nodeType: docker`). Boxes built before that (lcd `newenvlive`
+10612, `lcduat` 10680, ehop `newphp`) are still `docker` nodes; node type
+cannot change by redeploy, only by building a new box. If a needed tag is not
+in the catalog yet, wait for it rather than going back to `nodeType: docker`.
+
+Image facts that shaped the provisioner (seen on the plain `docker` node
+type; the provisioner works on both): no redis server, `passwd`, `iptables`, `jem`
 or `mailx` in the image; `REDIS_ENABLED` is ignored; `stub_status.conf`
 listens on `127.0.0.1:80`, so loopback curl tests hit it, not the site.
 
