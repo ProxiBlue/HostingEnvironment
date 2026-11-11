@@ -226,8 +226,9 @@ provisioner): `/etc/phpbox.env`, `/root/phpbox-credentials.txt`,
 
 - PHP: `expose_php=Off`, `allow_url_include=Off`, `open_basedir` (FPM pool only, CLI/drush unrestricted) limited to
   `/var/www/webroot`, `/tmp`, the composer cache and the PHP binary path,
-  `disable_functions=passthru` (`proc_open`/`popen` stay: Composer needs
-  them), secure session cookies, `request_terminate_timeout=600s`, slowlog
+  `disable_functions=passthru` (FPM pool only, CLI keeps it for
+  `n98-magerun2 db:dump`; `proc_open`/`popen` stay: Composer needs them),
+  secure session cookies, `request_terminate_timeout=600s`, slowlog
   at 30s.
 - nginx (magento): rate limits on admin (30r/s), customer login (2r/s),
   REST/GraphQL (10r/s); PHP execution only for `index.php`, `get.php`,
