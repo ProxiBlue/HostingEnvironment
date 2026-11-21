@@ -14,10 +14,11 @@ settings:
   - caption: "PHP Version"
     type: list
     values:
-        1.30.6-php-8.4.27-almalinux-9 : 8.4.27
+        1.30.7-php-8.4.28-almalinux-9 : 8.4.28
+        1.30.7-php-8.5.13-almalinux-9 : 8.5.13
     required: true
     name: PHP_VERSION
-    value: 1.30.6-php-8.4.27-almalinux-9
+    value: 1.30.7-php-8.4.28-almalinux-9
   - caption: Site profile
     type: list
     name: SITE_PROFILE
@@ -87,7 +88,9 @@ nodes:
 # The tag must be in the provider's catalog for nginxphp-dockerized, else the
 # platform silently falls back to its default stack; checkPhpVersion aborts
 # the install in that case. List the catalog: Change Environment Topology ->
-# NGINX PHP -> tag dropdown (1.30.6-php-8.4.27-almalinux-9 listed 2026-11-06).
+# NGINX PHP -> tag dropdown (1.30.6-php-8.4.27-almalinux-9 listed 2026-11-06;
+# 1.30.7-php-8.4.28 / 8.5.13 on Docker Hub 2026-11-20, php.net security
+# releases of 2026-11-19).
 - nodeType: nginxphp-dockerized
   tag: ${settings.PHP_VERSION}
   count: 1
