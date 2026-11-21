@@ -10,6 +10,10 @@ if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
 fi
+if [ "${FAIL2BAN:-true}" != true ]; then
+  echo "FAIL2BAN=${FAIL2BAN} in $ENV_FILE: fail2ban stays stopped, nothing to update"
+  exit 0
+fi
 REPO_BASE="https://raw.githubusercontent.com/ProxiBlue/HostingEnvironment/${REPO_REF}/configs/fail2ban"
 
 case "$SITE_PROFILE" in

@@ -25,6 +25,12 @@
 #   CLOUDFLARE       true|false. Site is behind Cloudflare's proxy: nginx
 #                    trusts CF-Connecting-IP from Cloudflare's published
 #                    ranges (fail2ban / logs see the visitor). Default: false.
+#   FAIL2BAN         true|false. false = fail2ban stays installed (filters,
+#                    jails, daily update cron) but the service is disabled and
+#                    stopped, and not restarted by re-apply or the daily
+#                    update. For an origin locked to Cloudflare without
+#                    real-ip, where it would only ever see (and ban) Cloudflare
+#                    edge IPs. Default: true.
 #   REPO_REF         git ref of ProxiBlue/HostingEnvironment to pull
 #                    configs from. Default: main.
 #
@@ -71,6 +77,7 @@ load_env() {
   : "${MOUNTS_DRUPAL:=}"
   : "${MOUNTS_MAGENTO:=}"
   : "${CLOUDFLARE:=false}"
+  : "${FAIL2BAN:=true}"
   case "$SITE_PROFILE" in
     magento) : "${DOCROOT:=/var/www/webroot/ROOT/pub}" ;;
     drupal)  : "${DOCROOT:=/var/www/webroot/ROOT/web}" ;;
@@ -93,6 +100,7 @@ REDIS_HOST="$REDIS_HOST"
 ES_HOST="$ES_HOST"
 BACKUP_EMAIL="$BACKUP_EMAIL"
 CLOUDFLARE="$CLOUDFLARE"
+FAIL2BAN="$FAIL2BAN"
 REPO_REF="$REPO_REF"
 EOF
   umask 022
@@ -366,6 +374,12 @@ fail2ban_config() {
   done
   fetch configs/fail2ban/fail2banUpdate.sh /root/fail2banUpdate.sh
   chmod +x /root/fail2banUpdate.sh
+  if [ "$FAIL2BAN" != true ]; then
+    # Package, filters and jails stay installed; the service is just off.
+    systemctl disable --now fail2ban >>"$LOG" 2>&1 || true
+    log "fail2ban: disabled (FAIL2BAN=$FAIL2BAN), package and config kept"
+    return 0
+  fi
   systemctl enable fail2ban >>"$LOG" 2>&1
   systemctl restart fail2ban >>"$LOG" 2>&1
 }
@@ -497,8 +511,9 @@ restart_services() {
 }
 
 verify() {
-  local ok=1
-  for s in nginx php-fpm redis monit fail2ban; do
+  local ok=1 svcs="nginx php-fpm redis monit"
+  [ "$FAIL2BAN" = true ] && svcs="$svcs fail2ban"
+  for s in $svcs; do
     systemctl is-active --quiet "$s" || { log "VERIFY: $s not active"; ok=0; }
   done
   local probe=/
