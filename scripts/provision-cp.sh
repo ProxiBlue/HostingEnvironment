@@ -50,6 +50,9 @@ SSL_DIR=/var/lib/jelastic/SSL
 # Hand-managed certificate (e.g. Cloudflare origin CA) kept on the NFS share
 # so a brand-new box picks it up: <nfs>/ssl/jelastic.chain + jelastic.key
 SSL_SEED_DIR=/var/www/webroot/nfs/ssl
+# nginx2root (2026-11-19): HTTP/2 was switched off by hand on nginx < 1.30.7.
+# From this version on, re-apply turns it back on (http2_enable).
+NGINX_HTTP2_MIN=1.30.7
 
 log() { echo "[provision-cp] $*" | tee -a "$LOG"; }
 die() { echo "[provision-cp] FATAL: $*" | tee -a "$LOG" >&2; exit 1; }
@@ -287,11 +290,34 @@ ssl_enable() {
     return 0
   fi
   if [ -f "$ssl" ] && grep -qE '^\s*listen\s+.*443' "$ssl"; then
+    http2_enable "$ssl"
     return 0   # already an active TLS server (ours or the add-on's)
   fi
   fetch configs/nginx/ssl.conf.disabled "$ssl"
   nginx -t >>"$LOG" 2>&1 || { log "ssl: nginx -t failed with ssl.conf, disabling"; mv "$ssl" "$ssl.disabled"; return 0; }
   log "ssl: enabled $ssl (certificate found)"
+}
+
+http2_enable() {
+  # An existing ssl.conf is never re-fetched, so an `http2 off;` set by hand
+  # (the nginx2root mitigation) would stay forever. Turn it back on once nginx
+  # has the fix; keep it off on older nginx. nginx -t failure restores the file.
+  local ssl="$1" ver
+  grep -qE '^\s*http2\s+off;' "$ssl" || return 0
+  ver="$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  if [ -z "$ver" ] || [ "$(printf '%s\n%s\n' "$NGINX_HTTP2_MIN" "$ver" | sort -V | head -1)" != "$NGINX_HTTP2_MIN" ]; then
+    log "ssl: nginx ${ver:-unknown} < $NGINX_HTTP2_MIN (nginx2root), http2 stays off"
+    return 0
+  fi
+  cp -p "$ssl" "$ssl.bak-http2"
+  sed -i -E 's/^(\s*)http2\s+off;/\1http2 on;/' "$ssl"
+  if nginx -t >>"$LOG" 2>&1; then
+    rm -f "$ssl.bak-http2"
+    log "ssl: http2 back on in $ssl (nginx $ver)"
+  else
+    mv -f "$ssl.bak-http2" "$ssl"
+    log "ssl: nginx -t failed with http2 on, $ssl restored"
+  fi
 }
 
 cloudflare_realip() {
